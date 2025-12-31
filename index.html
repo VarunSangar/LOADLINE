@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LOADLINE — Cognitive Load Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0e0f12;
+      color: #eaeaf0;
+      margin: 0;
+      padding: 1rem;
+    }
+
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    p { color: #b3b3c6; }
+
+    .container {
+      max-width: 900px;
+      margin: auto;
+      width: 100%;
+    }
+
+    .card {
+      background: #161820;
+      border-radius: 12px;
+      padding: 1rem;
+      margin-top: 1.25rem;
+    }
+
+    label {
+      display: block;
+      margin-top: 0.75rem;
+      font-weight: 600;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      padding: 0.6rem;
+      border-radius: 6px;
+      border: none;
+      background: #222431;
+      color: #fff;
+      margin-top: 0.25rem;
+      font-size: 1rem;
+    }
+
+    button {
+      margin-top: 0.75rem;
+      padding: 0.6rem 1rem;
+      background: #5b7cff;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    button.secondary {
+      background: #2a2d3e;
+    }
+
+    .task {
+      border-top: 1px solid #2a2d3e;
+      padding-top: 1rem;
+      margin-top: 1rem;
+    }
+
+    .task.active {
+      border-left: 4px solid #5b7cff;
+      padding-left: 0.75rem;
+    }
+
+    .timer {
+      font-size: 1.25rem;
+      margin-top: 0.25rem;
+      color: #9aa8ff;
+    }
+
+    .result {
+      font-size: 2.5rem;
+      font-weight: bold;
+    }
+
+    .state { font-size: 1.1rem; margin-top: 0.25rem; }
+    .stable { color: #4ade80; }
+    .rising { color: #facc15; }
+    .critical { color: #f87171; }
+
+    @media (min-width: 600px) {
+      button { width: auto; }
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+  <h1>LOADLINE</h1>
+  <p>Cognitive Load Index (CLI). Critical load → <em>immediate cognitive adjustment recommended</em>.</p>
+
+  <div class="card">
+    <h2>Tasks</h2>
+    <div id="tasks"></div>
+    <button onclick="addTask()">+ Add Task</button>
+  </div>
+
+  <div class="card">
+    <h2>Inefficiency Signals</h2>
+    <label><input type="checkbox" id="errorFriction"> Repeated mistakes / friction</label>
+    <label><input type="checkbox" id="visualEffort"> Eye strain / squinting</label>
+  </div>
+
+  <div class="card">
+    <h2>Current CLI</h2>
+    <div class="result" id="cliValue">—</div>
+    <div class="state" id="cliState"></div>
+  </div>
+</div>
+
+<script>
+  let tasks = [];
+  let activeTaskId = null;
+
+  function addTask() {
+    const id = Date.now();
+    tasks.push({
+      id,
+      name: "",
+      complexity: 0.5,
+      seconds: 0,
+      interval: null
+    });
+    renderTasks();
+  }
+
+  function renderTasks() {
+    const container = document.getElementById("tasks");
+    container.innerHTML = "";
+
+    tasks.forEach(task => {
+      const div = document.createElement("div");
+      div.className = "task" + (task.id === activeTaskId ? " active" : "");
+
+      const minutes = Math.floor(task.seconds / 60);
+      const seconds = task.seconds % 60;
+
+      div.innerHTML = `
+        <label>Task Name</label>
+        <input type="text" value="${task.name}"
+          oninput="task.name=this.value">
+
+        <label>Complexity (0–1)</label>
+        <input type="number" min="0" max="1" step="0.1"
+          value="${task.complexity}"
+          onchange="updateComplexity(${task.id}, this.value)">
+
+        <div class="timer">
+          Time on task: ${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}
+        </div>
+
+        <button onclick="startTask(${task.id})">Start</button>
+        <button class="secondary" onclick="stopTask(${task.id})">Stop</button>
+      `;
+
+      container.appendChild(div);
+    });
+
+    calculateCLI();
+  }
+
+  function startTask(id) {
+    stopAllTasks();
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    activeTaskId = id;
+    task.interval = setInterval(() => {
+      task.seconds++;
+      renderTasks();
+    }, 1000);
+  }
+
+  function stopTask(id) {
+    const task = tasks.find(t => t.id === id);
+    if (task && task.interval) {
+      clearInterval(task.interval);
+      task.interval = null;
+    }
+    activeTaskId = null;
+    renderTasks();
+  }
+
+  function stopAllTasks() {
+    tasks.forEach(t => {
+      if (t.interval) clearInterval(t.interval);
+      t.interval = null;
+    });
+  }
+
+  function updateComplexity(id, value) {
+    const task = tasks.find(t => t.id === id);
+    if (task) task.complexity = Number(value);
+    calculateCLI();
+  }
+
+  function calculateCLI() {
+    if (tasks.length === 0) return;
+
+    const totalLoad = tasks.reduce((sum, t) => {
+      const timeFactor = Math.min(t.seconds / 3600, 1);
+      return sum + ((t.complexity + timeFactor) / 2);
+    }, 0) / tasks.length;
+
+    const weightedLoad = totalLoad * 2;
+
+    const inefficiency =
+      (document.getElementById("errorFriction").checked ? 10 : 0) +
+      (document.getElementById("visualEffort").checked ? 10 : 0);
+
+    let CLI = (weightedLoad * 30) + inefficiency;
+    CLI = Math.max(0, Math.min(100, CLI));
+
+    displayCLI(Math.round(CLI));
+  }
+
+  function displayCLI(value) {
+    const cliEl = document.getElementById("cliValue");
+    const stateEl = document.getElementById("cliState");
+
+    cliEl.textContent = value;
+
+    if (value < 50) {
+      stateEl.textContent = "Stable cognitive load";
+      stateEl.className = "state stable";
+    } else if (value < 80) {
+      stateEl.textContent = "Rising cognitive load";
+      stateEl.className = "state rising";
+    } else {
+      stateEl.textContent = "Critical load — immediate cognitive adjustment recommended";
+      stateEl.className = "state critical";
+    }
+  }
+</script>
+</body>
+</html>
