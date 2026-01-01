@@ -39,7 +39,8 @@
     }
 
     input[type="text"],
-    input[type="number"] {
+    input[type="number"],
+    input[type="password"] {
       width: 100%;
       padding: 0.6rem;
       border-radius: 6px;
@@ -62,9 +63,7 @@
       width: 100%;
     }
 
-    button.secondary {
-      background: #2a2d3e;
-    }
+    button.secondary { background: #2a2d3e; }
 
     .task {
       border-top: 1px solid #2a2d3e;
@@ -93,6 +92,8 @@
     .rising { color: #facc15; }
     .critical { color: #f87171; }
 
+    #app { display: none; }
+
     @media (min-width: 600px) {
       button { width: auto; }
     }
@@ -100,7 +101,20 @@
 </head>
 
 <body>
-<div class="container">
+
+<div class="container" id="gate">
+  <div class="card">
+    <h1>LOADLINE</h1>
+    <p>Pilot Access Portal</p>
+
+    <label>Access Code</label>
+    <input type="password" id="accessCode" placeholder="Enter pilot code" />
+    <button onclick="unlock()">Enter</button>
+    <p id="error" style="color:#f87171;"></p>
+  </div>
+</div>
+
+<div class="container" id="app">
   <h1>LOADLINE</h1>
   <p>Cognitive Load Index (CLI). Critical load → <em>immediate cognitive adjustment recommended</em>.</p>
 
@@ -124,18 +138,26 @@
 </div>
 
 <script>
+  // ===== ACCESS CONTROL =====
+  const VALID_CODES = ["turtle123"];
+
+  function unlock() {
+    const code = document.getElementById("accessCode").value;
+    if (VALID_CODES.includes(code)) {
+      document.getElementById("gate").style.display = "none";
+      document.getElementById("app").style.display = "block";
+    } else {
+      document.getElementById("error").innerText = "Invalid access code.";
+    }
+  }
+
+  // ===== APP LOGIC =====
   let tasks = [];
   let activeTaskId = null;
 
   function addTask() {
     const id = Date.now();
-    tasks.push({
-      id,
-      name: "",
-      complexity: 0.5,
-      seconds: 0,
-      interval: null
-    });
+    tasks.push({ id, name: "", complexity: 0.5, seconds: 0, interval: null });
     renderTasks();
   }
 
@@ -152,8 +174,7 @@
 
       div.innerHTML = `
         <label>Task Name</label>
-        <input type="text" value="${task.name}"
-          oninput="task.name=this.value">
+        <input type="text" value="${task.name}" oninput="task.name=this.value">
 
         <label>Complexity (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
@@ -167,7 +188,6 @@
         <button onclick="startTask(${task.id})">Start</button>
         <button class="secondary" onclick="stopTask(${task.id})">Stop</button>
       `;
-
       container.appendChild(div);
     });
 
@@ -177,8 +197,6 @@
   function startTask(id) {
     stopAllTasks();
     const task = tasks.find(t => t.id === id);
-    if (!task) return;
-
     activeTaskId = id;
     task.interval = setInterval(() => {
       task.seconds++;
@@ -188,64 +206,50 @@
 
   function stopTask(id) {
     const task = tasks.find(t => t.id === id);
-    if (task && task.interval) {
-      clearInterval(task.interval);
-      task.interval = null;
-    }
+    if (task?.interval) clearInterval(task.interval);
     activeTaskId = null;
     renderTasks();
   }
 
   function stopAllTasks() {
-    tasks.forEach(t => {
-      if (t.interval) clearInterval(t.interval);
-      t.interval = null;
-    });
+    tasks.forEach(t => t.interval && clearInterval(t.interval));
   }
 
   function updateComplexity(id, value) {
     const task = tasks.find(t => t.id === id);
-    if (task) task.complexity = Number(value);
+    task.complexity = Number(value);
     calculateCLI();
   }
 
   function calculateCLI() {
-    if (tasks.length === 0) return;
+    if (!tasks.length) return;
 
-    const totalLoad = tasks.reduce((sum, t) => {
-      const timeFactor = Math.min(t.seconds / 3600, 1);
-      return sum + ((t.complexity + timeFactor) / 2);
-    }, 0) / tasks.length;
+    const load = tasks.reduce((s, t) =>
+      s + ((t.complexity + Math.min(t.seconds / 3600, 1)) / 2), 0) / tasks.length;
 
-    const weightedLoad = totalLoad * 2;
+    const weighted = load * 2;
+    const ineff =
+      (errorFriction.checked ? 10 : 0) +
+      (visualEffort.checked ? 10 : 0);
 
-    const inefficiency =
-      (document.getElementById("errorFriction").checked ? 10 : 0) +
-      (document.getElementById("visualEffort").checked ? 10 : 0);
-
-    let CLI = (weightedLoad * 30) + inefficiency;
-    CLI = Math.max(0, Math.min(100, CLI));
-
+    let CLI = Math.min(100, Math.max(0, weighted * 30 + ineff));
     displayCLI(Math.round(CLI));
   }
 
   function displayCLI(value) {
-    const cliEl = document.getElementById("cliValue");
-    const stateEl = document.getElementById("cliState");
-
-    cliEl.textContent = value;
-
+    cliValue.textContent = value;
     if (value < 50) {
-      stateEl.textContent = "Stable cognitive load";
-      stateEl.className = "state stable";
+      cliState.textContent = "Stable cognitive load";
+      cliState.className = "state stable";
     } else if (value < 80) {
-      stateEl.textContent = "Rising cognitive load";
-      stateEl.className = "state rising";
+      cliState.textContent = "Rising cognitive load";
+      cliState.className = "state rising";
     } else {
-      stateEl.textContent = "Critical load — immediate cognitive adjustment recommended";
-      stateEl.className = "state critical";
+      cliState.textContent = "Critical load — immediate cognitive adjustment recommended";
+      cliState.className = "state critical";
     }
   }
 </script>
 </body>
 </html>
+
