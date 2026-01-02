@@ -16,9 +16,14 @@
       padding: 1rem;
     }
 
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    h2 { margin-top: 0; }
+    p, li { color: #b3b3c6; line-height: 1.5; }
+
     .container {
       max-width: 900px;
       margin: auto;
+      width: 100%;
     }
 
     .card {
@@ -42,6 +47,7 @@
       background: #222431;
       color: #fff;
       margin-top: 0.25rem;
+      font-size: 1rem;
     }
 
     button {
@@ -68,27 +74,37 @@
       padding-left: 0.75rem;
     }
 
+    .timer { color: #9aa8ff; margin-top: 0.25rem; }
+
     .result {
       font-size: 2.5rem;
       font-weight: bold;
     }
 
-    canvas {
-      max-width: 100%;
-      margin-top: 1rem;
-    }
+    .metric { color:#b3b3c6; margin-top:0.25rem; }
 
-    .metric {
-      margin-top: 0.5rem;
-      color: #b3b3c6;
-    }
+    #app { display: none; }
+
+    canvas { max-width:100%; margin-top:1rem; }
   </style>
 </head>
 
 <body>
-<div class="container">
+
+<div class="container" id="gate">
+  <div class="card">
+    <h1>LOADLINE</h1>
+    <p>Pilot Access Portal</p>
+
+    <label>Access Code</label>
+    <input type="password" id="accessCode" />
+    <button onclick="unlock()">Enter</button>
+    <p id="error" style="color:#f87171;"></p>
+  </div>
+</div>
+
+<div class="container" id="app">
   <h1>LOADLINE</h1>
-  <p>Cognitive Load Index (CLI)</p>
 
   <div class="card">
     <h2>Tasks</h2>
@@ -102,148 +118,157 @@
     <div class="result" id="cliValue">—</div>
     <div class="metric">Peak CLI: <span id="cliPeak">—</span></div>
     <div class="metric">CLI / min: <span id="cliSlope">—</span></div>
-    <canvas id="cliChart"></canvas>
+    <canvas id="contribChart"></canvas>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-  let tasks = [];
-  let activeTaskId = null;
-  let cliHistory = [];
-  let startTime = Date.now();
-  let cliPeak = 0;
-  let chart;
+/* ===== ACCESS ===== */
+const VALID_CODES = ["turtle123"];
+function unlock() {
+  if (VALID_CODES.includes(accessCode.value)) {
+    gate.style.display = "none";
+    app.style.display = "block";
+    startTime = Date.now();
+  } else error.innerText = "Invalid access code.";
+}
 
-  function addTask() {
-    createTask("task");
-  }
+/* ===== STATE ===== */
+let tasks = [];
+let activeTaskId = null;
+let cliPeak = 0;
+let cliHistory = [];
+let startTime = null;
+let chart;
 
-  function addBreak() {
-    createTask("break");
-  }
+/* ===== TASKS ===== */
+function addTask() {
+  createTask("task");
+}
+function addBreak() {
+  createTask("break");
+}
 
-  function createTask(type) {
-    tasks.push({
-      id: Date.now(),
-      type,
-      name: type === "break" ? "Break" : "",
-      complexity: type === "break" ? 0 : 0.5,
-      seconds: 0,
-      interval: null
-    });
+function createTask(type) {
+  tasks.push({
+    id: Date.now(),
+    type,
+    name: type === "break" ? "Break" : "",
+    complexity: type === "break" ? 0 : 0.5,
+    seconds: 0,
+    interval: null
+  });
+  renderTasks();
+}
+
+function renderTasks() {
+  tasksDiv = document.getElementById("tasks");
+  tasksDiv.innerHTML = "";
+
+  tasks.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "task" + (t.id === activeTaskId ? " active" : "");
+
+    div.innerHTML = `
+      ${t.type === "task" ? `
+        <label>Task Name</label>
+        <input value="${t.name}" oninput="t.name=this.value">
+        <label>Complexity (0–1)</label>
+        <input type="number" min="0" max="1" step="0.1"
+          value="${t.complexity}"
+          onchange="t.complexity=Number(this.value)">
+      ` : `<strong>Break</strong>`}
+
+      <div class="timer">
+        ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}
+      </div>
+
+      <button onclick="startTask(${t.id})">Start</button>
+      <button class="secondary" onclick="stopTask(${t.id})">Stop</button>
+    `;
+    tasksDiv.appendChild(div);
+  });
+}
+
+/* ===== TIMERS ===== */
+function startTask(id) {
+  stopAllTasks();
+  const t = tasks.find(x=>x.id===id);
+  activeTaskId = id;
+
+  t.interval = setInterval(() => {
+    t.seconds++;
+    calculateCLI();
     renderTasks();
+  }, 1000);
+}
+
+function stopTask(id) {
+  const t = tasks.find(x=>x.id===id);
+  if (t?.interval) clearInterval(t.interval);
+  activeTaskId = null;
+}
+
+function stopAllTasks() {
+  tasks.forEach(t=>t.interval&&clearInterval(t.interval));
+}
+
+/* ===== CLI ===== */
+function calculateCLI() {
+  if (!tasks.length) return;
+
+  let totalLoad = 0;
+  let contributions = [];
+
+  tasks.forEach(t => {
+    if (t.type === "break") return;
+    const timeFactor = Math.min(t.seconds / 3600, 1);
+    const load = (t.complexity + timeFactor) / 2;
+    totalLoad += load;
+    contributions.push({ name: t.name || "Task", load });
+  });
+
+  // Break decay
+  const active = tasks.find(t=>t.id===activeTaskId);
+  if (active?.type === "break") totalLoad *= 0.985;
+
+  let CLI = Math.min(100, totalLoad * 30);
+  cliPeak = Math.max(cliPeak, CLI);
+
+  const elapsedMin = (Date.now() - startTime) / 60000;
+  cliHistory.push({ t: elapsedMin, v: CLI });
+
+  displayCLI(CLI, contributions);
+}
+
+/* ===== DISPLAY ===== */
+function displayCLI(CLI, contributions) {
+  cliValue.textContent = Math.round(CLI);
+  cliPeakSpan.textContent = Math.round(cliPeak);
+
+  if (cliHistory.length > 1) {
+    const dCLI = cliHistory.at(-1).v - cliHistory[0].v;
+    const dt = cliHistory.at(-1).t - cliHistory[0].t;
+    cliSlope.textContent = (dCLI / dt).toFixed(2);
   }
 
-  function renderTasks() {
-    const container = document.getElementById("tasks");
-    container.innerHTML = "";
+  renderChart(contributions);
+}
 
-    tasks.forEach(task => {
-      const div = document.createElement("div");
-      div.className = "task" + (task.id === activeTaskId ? " active" : "");
-
-      div.innerHTML = `
-        <label>${task.type === "break" ? "Break" : "Task Name"}</label>
-        ${task.type === "break" ? "" : `
-          <input type="text" value="${task.name}" oninput="task.name=this.value">
-          <label>Complexity (0–1)</label>
-          <input type="number" min="0" max="1" step="0.1"
-            value="${task.complexity}"
-            onchange="task.complexity=Number(this.value)">
-        `}
-        <div>Time: ${Math.floor(task.seconds/60)}:${String(task.seconds%60).padStart(2,"0")}</div>
-        <button onclick="startTask(${task.id})">Start</button>
-        <button class="secondary" onclick="stopTask(${task.id})">Stop</button>
-      `;
-      container.appendChild(div);
-    });
-  }
-
-  function startTask(id) {
-    stopAllTasks();
-    const task = tasks.find(t => t.id === id);
-    activeTaskId = id;
-
-    task.interval = setInterval(() => {
-      task.seconds++;
-      calculateCLI();
-      renderTasks();
-    }, 1000);
-  }
-
-  function stopTask(id) {
-    const task = tasks.find(t => t.id === id);
-    if (task?.interval) clearInterval(task.interval);
-    activeTaskId = null;
-  }
-
-  function stopAllTasks() {
-    tasks.forEach(t => t.interval && clearInterval(t.interval));
-  }
-
-  function calculateCLI() {
-    let totalLoad = 0;
-    let contributions = [];
-
-    tasks.forEach(t => {
-      if (t.type === "break") return;
-
-      const timeFactor = Math.min(t.seconds / 3600, 1);
-      const load = (t.complexity + timeFactor) / 2;
-      contributions.push({ name: t.name || "Unnamed", load });
-      totalLoad += load;
-    });
-
-    // Break decay
-    const active = tasks.find(t => t.id === activeTaskId);
-    if (active?.type === "break") {
-      totalLoad *= 0.985; // decay rate
+function renderChart(contribs) {
+  if (chart) chart.destroy();
+  chart = new Chart(contribChart, {
+    type: "pie",
+    data: {
+      labels: contribs.map(c=>c.name),
+      datasets: [{
+        data: contribs.map(c=>c.load)
+      }]
     }
-
-    const CLI = Math.min(100, totalLoad * 60);
-    cliPeak = Math.max(cliPeak, CLI);
-
-    cliHistory.push({ time: (Date.now()-startTime)/60000, CLI });
-
-    updateDisplay(CLI, contributions);
-  }
-
-  function updateDisplay(CLI, contributions) {
-    document.getElementById("cliValue").innerText = Math.round(CLI);
-    document.getElementById("cliPeak").innerText = Math.round(cliPeak);
-
-    if (cliHistory.length > 1) {
-      const dt = cliHistory.at(-1).time - cliHistory[0].time;
-      const dCLI = cliHistory.at(-1).CLI - cliHistory[0].CLI;
-      document.getElementById("cliSlope").innerText =
-        (dCLI / dt).toFixed(2);
-    }
-
-    renderChart(contributions);
-  }
-
-  function renderChart(contributions) {
-    const ctx = document.getElementById("cliChart");
-    if (chart) chart.destroy();
-
-    chart = new Chart(ctx, {
-      type: "pie",
-      data: {
-        labels: contributions.map(c => c.name),
-        datasets: [{
-          data: contributions.map(c => c.load),
-          backgroundColor: ["#5b7cff","#22c55e","#facc15","#f87171","#38bdf8"]
-        }]
-      },
-      options: {
-        plugins: {
-          legend: { labels: { color: "#eaeaf0" } }
-        }
-      }
-    });
-  }
+  });
+}
 </script>
 </body>
 </html>
