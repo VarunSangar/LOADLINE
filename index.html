@@ -16,14 +16,9 @@
       padding: 1rem;
     }
 
-    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
-    h2 { margin-top: 0; }
-    p, li { color: #b3b3c6; line-height: 1.5; }
-
     .container {
       max-width: 900px;
       margin: auto;
-      width: 100%;
     }
 
     .card {
@@ -39,9 +34,7 @@
       font-weight: 600;
     }
 
-    input[type="text"],
-    input[type="number"],
-    input[type="password"] {
+    input, select {
       width: 100%;
       padding: 0.6rem;
       border-radius: 6px;
@@ -49,7 +42,6 @@
       background: #222431;
       color: #fff;
       margin-top: 0.25rem;
-      font-size: 1rem;
     }
 
     button {
@@ -61,7 +53,6 @@
       color: #fff;
       font-weight: bold;
       cursor: pointer;
-      width: 100%;
     }
 
     button.secondary { background: #2a2d3e; }
@@ -77,142 +68,68 @@
       padding-left: 0.75rem;
     }
 
-    .timer {
-      font-size: 1.25rem;
-      margin-top: 0.25rem;
-      color: #9aa8ff;
-    }
-
     .result {
       font-size: 2.5rem;
       font-weight: bold;
     }
 
-    .state { font-size: 1.1rem; margin-top: 0.25rem; }
-    .stable { color: #4ade80; }
-    .rising { color: #facc15; }
-    .critical { color: #f87171; }
-
-    #app { display: none; }
-
-    details summary {
-      cursor: pointer;
-      font-weight: 600;
-      color: #9aa8ff;
+    canvas {
+      max-width: 100%;
+      margin-top: 1rem;
     }
 
-    @media (min-width: 600px) {
-      button { width: auto; }
+    .metric {
+      margin-top: 0.5rem;
+      color: #b3b3c6;
     }
   </style>
 </head>
 
 <body>
-
-<div class="container" id="gate">
-  <div class="card">
-    <h1>LOADLINE</h1>
-    <p>Pilot Access Portal</p>
-
-    <label>Access Code</label>
-    <input type="password" id="accessCode" placeholder="Enter pilot code" />
-    <button onclick="unlock()">Enter</button>
-    <p id="error" style="color:#f87171;"></p>
-  </div>
-</div>
-
-<div class="container" id="app">
+<div class="container">
   <h1>LOADLINE</h1>
-  <p>
-    Cognitive Load Index (CLI).  
-    <em>Critical load → immediate cognitive adjustment recommended.</em>
-  </p>
-
-  <p style="font-size:0.9rem;">
-    CLI is an experimental, non-diagnostic metric derived from time-on-task,
-    perceived difficulty, and inefficiency signals.
-  </p>
+  <p>Cognitive Load Index (CLI)</p>
 
   <div class="card">
     <h2>Tasks</h2>
     <div id="tasks"></div>
     <button onclick="addTask()">+ Add Task</button>
-  </div>
-
-  <div class="card">
-    <h2>Inefficiency Signals</h2>
-    <label><input type="checkbox" id="errorFriction"> Repeated mistakes / friction</label>
-    <label><input type="checkbox" id="visualEffort"> Eye strain / squinting</label>
+    <button class="secondary" onclick="addBreak()">+ Add Break</button>
   </div>
 
   <div class="card">
     <h2>Current CLI</h2>
     <div class="result" id="cliValue">—</div>
-    <div class="state" id="cliState"></div>
-  </div>
-
-  <div class="card">
-    <details>
-      <summary>Methodology & Assumptions</summary>
-      <p><strong>Definition.</strong> CLI is a bounded scalar (0–100) estimating short-term cognitive strain.</p>
-
-      <p><strong>Per-task load:</strong></p>
-      <ul>
-        <li>Difficulty is self-rated on a 0–1 scale.</li>
-        <li>Time-on-task is normalized and capped at one hour.</li>
-        <li>Task load is the mean of difficulty and time exposure.</li>
-      </ul>
-
-      <p><strong>Assumptions.</strong></p>
-      <ul>
-        <li>Time-on-task contributes more reliably to fatigue than difficulty alone.</li>
-        <li>Users can approximately rank task difficulty.</li>
-        <li>Inefficiency signals reflect transient cognitive friction.</li>
-        <li>Cognitive load may accumulate without immediate subjective awareness.</li>
-      </ul>
-
-      <p><strong>Limitations.</strong></p>
-      <ul>
-        <li>CLI does not measure neural or physiological activity.</li>
-        <li>Environmental and emotional variables are not explicitly modeled.</li>
-        <li>Difficulty ratings are subjective and unstandardized.</li>
-        <li>The model is descriptive, not diagnostic.</li>
-      </ul>
-
-      <p><strong>Falsifiability.</strong></p>
-      <ul>
-        <li>CLI fails to increase during prolonged low-difficulty work.</li>
-        <li>High CLI consistently contradicts reported or behavioral fatigue.</li>
-        <li>Inefficiency signals show no correlation with overload.</li>
-      </ul>
-    </details>
+    <div class="metric">Peak CLI: <span id="cliPeak">—</span></div>
+    <div class="metric">CLI / min: <span id="cliSlope">—</span></div>
+    <canvas id="cliChart"></canvas>
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
-  // ===== ACCESS CONTROL =====
-  const VALID_CODES = ["turtle123"];
-
-  function unlock() {
-    const code = document.getElementById("accessCode").value;
-    if (VALID_CODES.includes(code)) {
-      gate.style.display = "none";
-      app.style.display = "block";
-    } else {
-      error.innerText = "Invalid access code.";
-    }
-  }
-
-  // ===== APPLICATION STATE =====
   let tasks = [];
   let activeTaskId = null;
+  let cliHistory = [];
+  let startTime = Date.now();
+  let cliPeak = 0;
+  let chart;
 
   function addTask() {
-    const id = Date.now();
+    createTask("task");
+  }
+
+  function addBreak() {
+    createTask("break");
+  }
+
+  function createTask(type) {
     tasks.push({
-      id,
-      name: "",
-      complexity: 0.5,
+      id: Date.now(),
+      type,
+      name: type === "break" ? "Break" : "",
+      complexity: type === "break" ? 0 : 0.5,
       seconds: 0,
       interval: null
     });
@@ -227,29 +144,21 @@
       const div = document.createElement("div");
       div.className = "task" + (task.id === activeTaskId ? " active" : "");
 
-      const minutes = Math.floor(task.seconds / 60);
-      const seconds = task.seconds % 60;
-
       div.innerHTML = `
-        <label>Task Name</label>
-        <input type="text" value="${task.name}" oninput="task.name=this.value">
-
-        <label>Complexity (0–1)</label>
-        <input type="number" min="0" max="1" step="0.1"
-          value="${task.complexity}"
-          onchange="updateComplexity(${task.id}, this.value)">
-
-        <div class="timer">
-          Time on task: ${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}
-        </div>
-
+        <label>${task.type === "break" ? "Break" : "Task Name"}</label>
+        ${task.type === "break" ? "" : `
+          <input type="text" value="${task.name}" oninput="task.name=this.value">
+          <label>Complexity (0–1)</label>
+          <input type="number" min="0" max="1" step="0.1"
+            value="${task.complexity}"
+            onchange="task.complexity=Number(this.value)">
+        `}
+        <div>Time: ${Math.floor(task.seconds/60)}:${String(task.seconds%60).padStart(2,"0")}</div>
         <button onclick="startTask(${task.id})">Start</button>
         <button class="secondary" onclick="stopTask(${task.id})">Stop</button>
       `;
       container.appendChild(div);
     });
-
-    calculateCLI();
   }
 
   function startTask(id) {
@@ -259,6 +168,7 @@
 
     task.interval = setInterval(() => {
       task.seconds++;
+      calculateCLI();
       renderTasks();
     }, 1000);
   }
@@ -267,69 +177,73 @@
     const task = tasks.find(t => t.id === id);
     if (task?.interval) clearInterval(task.interval);
     activeTaskId = null;
-    renderTasks();
   }
 
   function stopAllTasks() {
     tasks.forEach(t => t.interval && clearInterval(t.interval));
   }
 
-  function updateComplexity(id, value) {
-    const task = tasks.find(t => t.id === id);
-    task.complexity = Number(value);
-    calculateCLI();
-  }
-
   function calculateCLI() {
-    if (!tasks.length) return;
+    let totalLoad = 0;
+    let contributions = [];
 
-    /*
-      CLI MODEL:
-      For each task:
-        - Normalize time-on-task (cap at 1 hour)
-        - Average with perceived difficulty
-      Aggregate across tasks
-      Apply scaling and inefficiency penalties
-      Bound result to [0, 100]
-    */
+    tasks.forEach(t => {
+      if (t.type === "break") return;
 
-    const averageLoad = tasks.reduce((sum, task) => {
-      const timeFactor = Math.min(task.seconds / 3600, 1);
-      const taskLoad = (task.complexity + timeFactor) / 2;
-      return sum + taskLoad;
-    }, 0) / tasks.length;
+      const timeFactor = Math.min(t.seconds / 3600, 1);
+      const load = (t.complexity + timeFactor) / 2;
+      contributions.push({ name: t.name || "Unnamed", load });
+      totalLoad += load;
+    });
 
-    const scaledLoad = averageLoad * 2;
+    // Break decay
+    const active = tasks.find(t => t.id === activeTaskId);
+    if (active?.type === "break") {
+      totalLoad *= 0.985; // decay rate
+    }
 
-    const inefficiencyPenalty =
-      (errorFriction.checked ? 10 : 0) +
-      (visualEffort.checked ? 10 : 0);
+    const CLI = Math.min(100, totalLoad * 60);
+    cliPeak = Math.max(cliPeak, CLI);
 
-    const CLI = Math.min(
-      100,
-      Math.max(0, scaledLoad * 30 + inefficiencyPenalty)
-    );
+    cliHistory.push({ time: (Date.now()-startTime)/60000, CLI });
 
-    displayCLI(Math.round(CLI));
+    updateDisplay(CLI, contributions);
   }
 
-  function displayCLI(value) {
-    cliValue.textContent = value;
+  function updateDisplay(CLI, contributions) {
+    document.getElementById("cliValue").innerText = Math.round(CLI);
+    document.getElementById("cliPeak").innerText = Math.round(cliPeak);
 
-    if (value < 50) {
-      cliState.textContent = "Stable cognitive load";
-      cliState.className = "state stable";
-    } else if (value < 80) {
-      cliState.textContent = "Rising cognitive load";
-      cliState.className = "state rising";
-    } else {
-      cliState.textContent = "Critical load — immediate cognitive adjustment recommended";
-      cliState.className = "state critical";
+    if (cliHistory.length > 1) {
+      const dt = cliHistory.at(-1).time - cliHistory[0].time;
+      const dCLI = cliHistory.at(-1).CLI - cliHistory[0].CLI;
+      document.getElementById("cliSlope").innerText =
+        (dCLI / dt).toFixed(2);
     }
+
+    renderChart(contributions);
+  }
+
+  function renderChart(contributions) {
+    const ctx = document.getElementById("cliChart");
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+      type: "pie",
+      data: {
+        labels: contributions.map(c => c.name),
+        datasets: [{
+          data: contributions.map(c => c.load),
+          backgroundColor: ["#5b7cff","#22c55e","#facc15","#f87171","#38bdf8"]
+        }]
+      },
+      options: {
+        plugins: {
+          legend: { labels: { color: "#eaeaf0" } }
+        }
+      }
+    });
   }
 </script>
 </body>
 </html>
-
-
-
