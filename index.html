@@ -1,4 +1,14 @@
 <script>
+/* ========= DOM ========= */
+const gate = document.getElementById("gate");
+const app = document.getElementById("app");
+const accessCode = document.getElementById("accessCode");
+const error = document.getElementById("error");
+const sessionTime = document.getElementById("sessionTime");
+const cliValue = document.getElementById("cliValue");
+const cliPeak = document.getElementById("cliPeak");
+const cliRate = document.getElementById("cliRate");
+const pieChart = document.getElementById("pieChart");
 /* ========= ACCESS ========= */
 const VALID_CODES = ["turtle123"];
 function unlock(){
@@ -180,3 +190,4 @@ function download(data,name,type){
   a.click();
 }
 </script>
+
