@@ -1,92 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>LOADLINE — Cognitive Load Index</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8" />
+<title>LOADLINE — Cognitive Load Index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <style>
-    * { box-sizing: border-box; }
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #0e0f12;
-      color: #eaeaf0;
-      margin: 0;
-      padding: 1rem;
-    }
+<style>
+* { box-sizing: border-box; }
 
-    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
-    h2 { margin-top: 0; }
-    p, li { color: #b3b3c6; line-height: 1.5; }
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background:#0e0f12;
+  color:#eaeaf0;
+  margin:0;
+  padding:1rem;
+}
 
-    .container {
-      max-width: 900px;
-      margin: auto;
-      width: 100%;
-    }
+.container { max-width:1000px; margin:auto; }
+.card {
+  background:#161820;
+  border-radius:14px;
+  padding:1.25rem;
+  margin-top:1.25rem;
+}
 
-    .card {
-      background: #161820;
-      border-radius: 12px;
-      padding: 1rem;
-      margin-top: 1.25rem;
-    }
+h1 { font-size:2.2rem; margin-bottom:0; }
+h2 { margin-top:0; }
+.metric { color:#b3b3c6; margin-top:0.25rem; }
 
-    label {
-      display: block;
-      margin-top: 0.75rem;
-      font-weight: 600;
-    }
+button {
+  background:#5b7cff;
+  border:none;
+  border-radius:8px;
+  padding:0.6rem 1rem;
+  color:#fff;
+  font-weight:600;
+  cursor:pointer;
+  margin-top:0.5rem;
+}
 
-    input, select {
-      width: 100%;
-      padding: 0.6rem;
-      border-radius: 6px;
-      border: none;
-      background: #222431;
-      color: #fff;
-      margin-top: 0.25rem;
-      font-size: 1rem;
-    }
+button.secondary { background:#2a2d3e; }
 
-    button {
-      margin-top: 0.75rem;
-      padding: 0.6rem 1rem;
-      background: #5b7cff;
-      border: none;
-      border-radius: 6px;
-      color: #fff;
-      font-weight: bold;
-      cursor: pointer;
-    }
+input {
+  width:100%;
+  padding:0.55rem;
+  border-radius:6px;
+  border:none;
+  background:#222431;
+  color:#fff;
+  margin-top:0.25rem;
+}
 
-    button.secondary { background: #2a2d3e; }
+.task {
+  border-top:1px solid #2a2d3e;
+  padding-top:1rem;
+  margin-top:1rem;
+}
 
-    .task {
-      border-top: 1px solid #2a2d3e;
-      padding-top: 1rem;
-      margin-top: 1rem;
-    }
+.task.active {
+  border-left:4px solid #5b7cff;
+  padding-left:0.75rem;
+}
 
-    .task.active {
-      border-left: 4px solid #5b7cff;
-      padding-left: 0.75rem;
-    }
+.result {
+  font-size:3rem;
+  font-weight:800;
+}
 
-    .timer { color: #9aa8ff; margin-top: 0.25rem; }
-
-    .result {
-      font-size: 2.5rem;
-      font-weight: bold;
-    }
-
-    .metric { color:#b3b3c6; margin-top:0.25rem; }
-
-    #app { display: none; }
-
-    canvas { max-width:100%; margin-top:1rem; }
-  </style>
+canvas { max-width:100%; margin-top:1rem; }
+</style>
 </head>
 
 <body>
@@ -94,17 +78,24 @@
 <div class="container" id="gate">
   <div class="card">
     <h1>LOADLINE</h1>
-    <p>Pilot Access Portal</p>
-
-    <label>Access Code</label>
-    <input type="password" id="accessCode" />
+    <p class="metric">Pilot Access</p>
+    <input id="accessCode" type="password" placeholder="Access code" />
     <button onclick="unlock()">Enter</button>
     <p id="error" style="color:#f87171;"></p>
   </div>
 </div>
 
-<div class="container" id="app">
-  <h1>LOADLINE</h1>
+<div class="container" id="app" style="display:none;">
+  <h1>LOADLINE v2</h1>
+
+  <div class="card">
+    <h2>Live Cognitive Load</h2>
+    <div class="result" id="cliValue">—</div>
+    <div class="metric">⏱ Time Active: <span id="sessionTime">0:00</span></div>
+    <div class="metric">📈 CLI / min: <span id="cliRate">—</span></div>
+    <div class="metric">🔥 Peak CLI: <span id="cliPeak">—</span></div>
+    <canvas id="pieChart"></canvas>
+  </div>
 
   <div class="card">
     <h2>Tasks</h2>
@@ -114,160 +105,164 @@
   </div>
 
   <div class="card">
-    <h2>Current CLI</h2>
-    <div class="result" id="cliValue">—</div>
-    <div class="metric">Peak CLI: <span id="cliPeak">—</span></div>
-    <div class="metric">CLI / min: <span id="cliSlope">—</span></div>
-    <canvas id="contribChart"></canvas>
+    <h2>Export</h2>
+    <button onclick="exportCSV()">Export CSV</button>
+    <button class="secondary" onclick="exportJSON()">Export JSON</button>
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <script>
-/* ===== ACCESS ===== */
+/* ========= ACCESS ========= */
 const VALID_CODES = ["turtle123"];
-function unlock() {
-  if (VALID_CODES.includes(accessCode.value)) {
-    gate.style.display = "none";
-    app.style.display = "block";
-    startTime = Date.now();
-  } else error.innerText = "Invalid access code.";
+function unlock(){
+  if(VALID_CODES.includes(accessCode.value)){
+    gate.style.display="none";
+    app.style.display="block";
+    sessionStart = Date.now();
+    globalTimer = setInterval(tick,1000);
+  } else error.textContent="Invalid access code.";
 }
 
-/* ===== STATE ===== */
-let tasks = [];
-let activeTaskId = null;
-let cliPeak = 0;
-let cliHistory = [];
-let startTime = null;
-let chart;
+/* ========= STATE ========= */
+let tasks=[];
+let activeTask=null;
+let sessionStart=null;
+let globalTimer=null;
+let cliPeak=0;
+let cliLog=[];
+let chart=null;
 
-/* ===== TASKS ===== */
-function addTask() {
-  createTask("task");
-}
-function addBreak() {
-  createTask("break");
-}
+/* ========= TASKS ========= */
+function addTask(){ createTask("task"); }
+function addBreak(){ createTask("break"); }
 
-function createTask(type) {
+function createTask(type){
   tasks.push({
-    id: Date.now(),
+    id:Date.now(),
     type,
-    name: type === "break" ? "Break" : "",
-    complexity: type === "break" ? 0 : 0.5,
-    seconds: 0,
-    interval: null
+    name:type==="break"?"Break":"",
+    difficulty:type==="break"?0:0.5,
+    seconds:0,
+    cliContribution:0
   });
   renderTasks();
 }
 
-function renderTasks() {
-  tasksDiv = document.getElementById("tasks");
-  tasksDiv.innerHTML = "";
-
-  tasks.forEach(t => {
-    const div = document.createElement("div");
-    div.className = "task" + (t.id === activeTaskId ? " active" : "");
-
-    div.innerHTML = `
-      ${t.type === "task" ? `
+function renderTasks(){
+  const el=document.getElementById("tasks");
+  el.innerHTML="";
+  tasks.forEach(t=>{
+    const div=document.createElement("div");
+    div.className="task"+(activeTask===t.id?" active":"");
+    div.innerHTML=`
+      ${t.type==="task"?`
         <label>Task Name</label>
         <input value="${t.name}" oninput="t.name=this.value">
-        <label>Complexity (0–1)</label>
+        <label>Difficulty (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
-          value="${t.complexity}"
-          onchange="t.complexity=Number(this.value)">
-      ` : `<strong>Break</strong>`}
-
-      <div class="timer">
-        ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}
-      </div>
-
-      <button onclick="startTask(${t.id})">Start</button>
-      <button class="secondary" onclick="stopTask(${t.id})">Stop</button>
+          value="${t.difficulty}"
+          onchange="t.difficulty=Number(this.value)">
+      `:`<strong>Break</strong>`}
+      <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
+      <button onclick="start(${t.id})">Start</button>
+      <button class="secondary" onclick="stop()">Stop</button>
     `;
-    tasksDiv.appendChild(div);
+    el.appendChild(div);
   });
 }
 
-/* ===== TIMERS ===== */
-function startTask(id) {
-  stopAllTasks();
-  const t = tasks.find(x=>x.id===id);
-  activeTaskId = id;
+function start(id){ activeTask=id; }
+function stop(){ activeTask=null; }
 
-  t.interval = setInterval(() => {
+/* ========= CORE LOOP ========= */
+function tick(){
+  if(!sessionStart) return;
+
+  const elapsed=Math.floor((Date.now()-sessionStart)/1000);
+  sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
+
+  if(activeTask){
+    const t=tasks.find(x=>x.id===activeTask);
     t.seconds++;
-    calculateCLI();
-    renderTasks();
-  }, 1000);
-}
-
-function stopTask(id) {
-  const t = tasks.find(x=>x.id===id);
-  if (t?.interval) clearInterval(t.interval);
-  activeTaskId = null;
-}
-
-function stopAllTasks() {
-  tasks.forEach(t=>t.interval&&clearInterval(t.interval));
-}
-
-/* ===== CLI ===== */
-function calculateCLI() {
-  if (!tasks.length) return;
-
-  let totalLoad = 0;
-  let contributions = [];
-
-  tasks.forEach(t => {
-    if (t.type === "break") return;
-    const timeFactor = Math.min(t.seconds / 3600, 1);
-    const load = (t.complexity + timeFactor) / 2;
-    totalLoad += load;
-    contributions.push({ name: t.name || "Task", load });
-  });
-
-  // Break decay
-  const active = tasks.find(t=>t.id===activeTaskId);
-  if (active?.type === "break") totalLoad *= 0.985;
-
-  let CLI = Math.min(100, totalLoad * 30);
-  cliPeak = Math.max(cliPeak, CLI);
-
-  const elapsedMin = (Date.now() - startTime) / 60000;
-  cliHistory.push({ t: elapsedMin, v: CLI });
-
-  displayCLI(CLI, contributions);
-}
-
-/* ===== DISPLAY ===== */
-function displayCLI(CLI, contributions) {
-  cliValue.textContent = Math.round(CLI);
-  cliPeakSpan.textContent = Math.round(cliPeak);
-
-  if (cliHistory.length > 1) {
-    const dCLI = cliHistory.at(-1).v - cliHistory[0].v;
-    const dt = cliHistory.at(-1).t - cliHistory[0].t;
-    cliSlope.textContent = (dCLI / dt).toFixed(2);
   }
 
-  renderChart(contributions);
+  computeCLI();
 }
 
-function renderChart(contribs) {
-  if (chart) chart.destroy();
-  chart = new Chart(contribChart, {
-    type: "pie",
-    data: {
-      labels: contribs.map(c=>c.name),
-      datasets: [{
-        data: contribs.map(c=>c.load)
-      }]
+/* ========= CLI MODEL ========= */
+function computeCLI(){
+  let total=0;
+  let pieLabels=[];
+  let pieValues=[];
+
+  tasks.forEach(t=>{
+    let load=0;
+
+    if(t.type==="task"){
+      const timeFactor=Math.min(t.seconds/1800,1);
+      load=(t.difficulty+timeFactor)/2;
+    }
+
+    if(t.type==="break" && activeTask===t.id){
+      load=-0.015 * t.seconds; // exponential decay effect
+    }
+
+    t.cliContribution=load;
+    total+=load;
+
+    if(load>0){
+      pieLabels.push(t.name||"Task");
+      pieValues.push(load);
     }
   });
+
+  const CLI=Math.max(0,Math.min(100,total*30));
+  cliPeak=Math.max(cliPeak,CLI);
+
+  cliLog.push({time:Date.now(),cli:CLI});
+
+  cliValue.textContent=Math.round(CLI);
+  cliPeak.textContent=Math.round(cliPeak);
+
+  if(cliLog.length>10){
+    const a=cliLog.at(-1);
+    const b=cliLog.at(-10);
+    const rate=((a.cli-b.cli)/((a.time-b.time)/60000)).toFixed(2);
+    cliRate.textContent=rate;
+  }
+
+  updateChart(pieLabels,pieValues);
+}
+
+/* ========= PIE ========= */
+function updateChart(labels,data){
+  if(chart) chart.destroy();
+  chart=new Chart(pieChart,{
+    type:"pie",
+    data:{ labels,datasets:[{data}] },
+    options:{ plugins:{legend:{labels:{color:"#eaeaf0"}}}}
+  });
+}
+
+/* ========= EXPORT ========= */
+function exportCSV(){
+  let csv="time,task,type,difficulty,seconds,cli\n";
+  tasks.forEach(t=>{
+    csv+=`${Date.now()},${t.name},${t.type},${t.difficulty},${t.seconds},${t.cliContribution}\n`;
+  });
+  download(csv,"loadline.csv","text/csv");
+}
+
+function exportJSON(){
+  download(JSON.stringify({tasks,cliLog},null,2),"loadline.json","application/json");
+}
+
+function download(data,name,type){
+  const blob=new Blob([data],{type});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=name;
+  a.click();
 }
 </script>
 </body>
