@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -22,19 +22,19 @@ body {
 .card {
   background:#161820;
   border-radius:14px;
-  padding:1.1rem;
+  padding:1.25rem;
   margin-top:1.25rem;
 }
 
 h1 { font-size:2.2rem; margin-bottom:0; }
 h2 { margin-top:0; }
-.metric { color:#b3b3c6; font-size:0.9rem; }
+.metric { color:#b3b3c6; margin-top:0.25rem; }
 
 button {
   background:#5b7cff;
   border:none;
   border-radius:8px;
-  padding:0.55rem 0.9rem;
+  padding:0.6rem 1rem;
   color:#fff;
   font-weight:600;
   cursor:pointer;
@@ -65,22 +65,13 @@ input {
 }
 
 .result {
-  font-size:2.2rem;
+  font-size:3rem;
   font-weight:800;
-  line-height:1;
-}
-
-.metrics-grid {
-  display:grid;
-  grid-template-columns:repeat(2,1fr);
-  gap:0.35rem 1rem;
-  margin-top:0.5rem;
 }
 
 canvas {
   max-width:100%;
-  height:220px !important;
-  margin-top:0.75rem;
+  margin-top:1rem;
 }
 </style>
 </head>
@@ -102,20 +93,10 @@ canvas {
 
   <div class="card">
     <h2>Live Cognitive Load</h2>
-
     <div class="result" id="cliValue">—</div>
-
-    <div class="metrics-grid">
-      <div class="metric">⏱ Time Active</div>
-      <div class="metric" id="sessionTime">0:00</div>
-
-      <div class="metric">📈 CLI / min</div>
-      <div class="metric" id="cliRate">—</div>
-
-      <div class="metric">🔥 Peak CLI</div>
-      <div class="metric" id="cliPeak">—</div>
-    </div>
-
+    <div class="metric">⏱ Time Active: <span id="sessionTime">0:00</span></div>
+    <div class="metric">📈 CLI / min: <span id="cliRate">—</span></div>
+    <div class="metric">🔥 Peak CLI: <span id="cliPeak">—</span></div>
     <canvas id="pieChart"></canvas>
   </div>
 
@@ -135,14 +116,14 @@ canvas {
 
 <script>
 /* ========= ACCESS ========= */
-const VALID_CODES=["turtle123"];
+const VALID_CODES = ["turtle123"];
 function unlock(){
   if(VALID_CODES.includes(accessCode.value)){
     gate.style.display="none";
     app.style.display="block";
-    sessionStart=Date.now();
+    sessionStart = Date.now();
+    globalTimer = setInterval(tick,1000);
     initChart();
-    setInterval(tick,1000);
   } else error.textContent="Invalid access code.";
 }
 
@@ -150,6 +131,7 @@ function unlock(){
 let tasks=[];
 let activeTask=null;
 let sessionStart=null;
+let globalTimer=null;
 let cliPeak=0;
 let cliLog=[];
 let chart=null;
@@ -159,9 +141,8 @@ function addTask(){ createTask("task"); }
 function addBreak(){ createTask("break"); }
 
 function createTask(type){
-  const id=Date.now();
   tasks.push({
-    id,
+    id:Date.now()+Math.random(),
     type,
     name:type==="break"?"Break":"",
     difficulty:type==="break"?0:0.5,
@@ -180,15 +161,13 @@ function renderTasks(){
     div.innerHTML=`
       ${t.type==="task"?`
         <label>Task Name</label>
-        <input value="${t.name}" oninput="this.oninput=null; t.name=this.value">
+        <input value="${t.name}" oninput="t.name=this.value">
         <label>Difficulty (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
           value="${t.difficulty}"
           onchange="t.difficulty=Number(this.value)">
       `:`<strong>Break</strong>`}
-
-      <div class="metric" id="timer-${t.id}">⏱ 0:00</div>
-
+      <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
       <button onclick="start(${t.id})">Start</button>
       <button class="secondary" onclick="stop()">Stop</button>
     `;
@@ -201,83 +180,110 @@ function stop(){ activeTask=null; }
 
 /* ========= CORE LOOP ========= */
 function tick(){
+  if(!sessionStart) return;
+
   const elapsed=Math.floor((Date.now()-sessionStart)/1000);
   sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
 
   if(activeTask){
     const t=tasks.find(x=>x.id===activeTask);
-    t.seconds++;
-    updateTimer(t);
+    if(t) t.seconds++;
   }
 
   computeCLI();
 }
 
-function updateTimer(t){
-  const el=document.getElementById(`timer-${t.id}`);
-  if(!el) return;
-  el.textContent=`⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}`;
-}
-
-/* ========= CLI ========= */
+/* ========= CLI MODEL ========= */
 function computeCLI(){
-  let total=0;
-  let labels=[], values=[];
+  let totalLoad=0;
+  let contributors=[];
 
   tasks.forEach(t=>{
     let load=0;
 
     if(t.type==="task"){
-      const tf=Math.min(t.seconds/1800,1);
-      load=(t.difficulty+tf)/2;
+      const timeFactor=Math.min(t.seconds/1800,1);
+      load=(t.difficulty+timeFactor)/2;
     }
 
     if(t.type==="break" && activeTask===t.id){
-      load=-0.015*t.seconds;
+      load=-0.015 * t.seconds;
     }
 
     t.cliContribution=load;
-    total+=load;
-
-    if(load>0){
-      labels.push(t.name||"Task");
-      values.push(load);
+    if(load>0 && t.type==="task"){
+      contributors.push({ name: t.name || "Task", load });
     }
+
+    totalLoad+=load;
   });
 
-  const CLI=Math.max(0,Math.min(100,total*30));
+  const CLI=Math.max(0,Math.min(100,totalLoad*30));
   cliPeak=Math.max(cliPeak,CLI);
-
-  cliLog.push({t:Date.now(),v:CLI});
+  cliLog.push({time:Date.now(),cli:CLI});
 
   cliValue.textContent=Math.round(CLI);
   cliPeak.textContent=Math.round(cliPeak);
 
   if(cliLog.length>10){
-    const a=cliLog.at(-1), b=cliLog.at(-10);
-    cliRate.textContent=((a.v-b.v)/((a.t-b.t)/60000)).toFixed(2);
+    const a=cliLog.at(-1);
+    const b=cliLog.at(-10);
+    const rate=((a.cli-b.cli)/((a.time-b.time)/60000)).toFixed(2);
+    cliRate.textContent=rate;
   }
 
-  updateChart(labels,values);
+  updateChart(contributors);
 }
 
-/* ========= PIE ========= */
+/* ========= PIE CHART ========= */
 function initChart(){
   chart=new Chart(pieChart,{
     type:"pie",
-    data:{labels:[],datasets:[{data:[]}]},
+    data:{
+      labels:["Idle"],
+      datasets:[{
+        data:[1],
+        backgroundColor:["#2a2d3e"],
+        borderWidth:0
+      }]
+    },
     options:{
       responsive:true,
-      maintainAspectRatio:false,
       animation:false,
-      plugins:{legend:{labels:{color:"#eaeaf0"}}}
+      plugins:{
+        legend:{
+          position:"bottom",
+          labels:{ color:"#eaeaf0", padding:12 }
+        }
+      },
+      layout:{ padding:10 }
     }
   });
 }
 
-function updateChart(labels,data){
-  chart.data.labels=labels;
-  chart.data.datasets[0].data=data;
+function updateChart(contributors){
+  if(!chart) return;
+
+  if(contributors.length===0){
+    chart.data.labels=["Idle"];
+    chart.data.datasets[0].data=[1];
+    chart.data.datasets[0].backgroundColor=["#2a2d3e"];
+    chart.update();
+    return;
+  }
+
+  const total=contributors.reduce((s,c)=>s+c.load,0);
+
+  chart.data.labels=contributors.map(c=>c.name);
+  chart.data.datasets[0].data=
+    contributors.length===1
+      ? [1]
+      : contributors.map(c=>c.load/total);
+
+  chart.data.datasets[0].backgroundColor=[
+    "#5b7cff","#22c55e","#f97316","#ec4899","#a855f7"
+  ];
+
   chart.update();
 }
 
