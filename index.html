@@ -1,14 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>LOADLINE v2 — Cognitive Load Index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  background:#0e0f12;
+  color:#eaeaf0;
+  margin:0;
+  padding:1rem;
+}
+
+.container { max-width:1000px; margin:auto; }
+.card {
+  background:#161820;
+  border-radius:14px;
+  padding:1.25rem;
+  margin-top:1.25rem;
+}
+
+h1 { font-size:2.2rem; margin-bottom:0; }
+h2 { margin-top:0; }
+.metric { color:#b3b3c6; margin-top:0.25rem; }
+
+button {
+  background:#5b7cff;
+  border:none;
+  border-radius:8px;
+  padding:0.6rem 1rem;
+  color:#fff;
+  font-weight:600;
+  cursor:pointer;
+  margin-top:0.5rem;
+}
+
+button.secondary { background:#2a2d3e; }
+
+input {
+  width:100%;
+  padding:0.55rem;
+  border-radius:6px;
+  border:none;
+  background:#222431;
+  color:#fff;
+  margin-top:0.25rem;
+}
+
+.task {
+  border-top:1px solid #2a2d3e;
+  padding-top:1rem;
+  margin-top:1rem;
+}
+
+.task.active {
+  border-left:4px solid #5b7cff;
+  padding-left:0.75rem;
+}
+
+.result {
+  font-size:3rem;
+  font-weight:800;
+}
+
+canvas {
+  max-width:100%;
+  margin-top:1rem;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container" id="gate">
+  <div class="card">
+    <h1>LOADLINE</h1>
+    <p class="metric">Pilot Access</p>
+    <input id="accessCode" type="password" placeholder="Access code" />
+    <button onclick="unlock()">Enter</button>
+    <p id="error" style="color:#f87171;"></p>
+  </div>
+</div>
+
+<div class="container" id="app" style="display:none;">
+  <h1>LOADLINE v2</h1>
+
+  <div class="card">
+    <h2>Live Cognitive Load</h2>
+    <div class="result" id="cliValue">—</div>
+    <div class="metric">⏱ Time Active: <span id="sessionTime">0:00</span></div>
+    <div class="metric">📈 CLI / min: <span id="cliRate">—</span></div>
+    <div class="metric">🔥 Peak CLI: <span id="cliPeak">—</span></div>
+    <canvas id="pieChart"></canvas>
+  </div>
+
+  <div class="card">
+    <h2>Tasks</h2>
+    <div id="tasks"></div>
+    <button onclick="addTask()">+ Add Task</button>
+    <button class="secondary" onclick="addBreak()">+ Add Break</button>
+  </div>
+
+  <div class="card">
+    <h2>Export</h2>
+    <button onclick="exportCSV()">Export CSV</button>
+    <button class="secondary" onclick="exportJSON()">Export JSON</button>
+  </div>
+</div>
+
 <script>
-/* ========= DOM ========= */
-const gate = document.getElementById("gate");
-const app = document.getElementById("app");
-const accessCode = document.getElementById("accessCode");
-const error = document.getElementById("error");
-const sessionTime = document.getElementById("sessionTime");
-const cliValue = document.getElementById("cliValue");
-const cliPeak = document.getElementById("cliPeak");
-const cliRate = document.getElementById("cliRate");
-const pieChart = document.getElementById("pieChart");
 /* ========= ACCESS ========= */
 const VALID_CODES = ["turtle123"];
 function unlock(){
@@ -16,7 +122,7 @@ function unlock(){
     gate.style.display="none";
     app.style.display="block";
     sessionStart = Date.now();
-    setInterval(tick,1000);
+    globalTimer = setInterval(tick,1000);
     initChart();
   } else error.textContent="Invalid access code.";
 }
@@ -25,19 +131,10 @@ function unlock(){
 let tasks=[];
 let activeTask=null;
 let sessionStart=null;
+let globalTimer=null;
 let cliPeak=0;
 let cliLog=[];
 let chart=null;
-
-/* ========= TASK HELPERS ========= */
-function updateName(id,val){
-  const t=tasks.find(x=>x.id===id);
-  if(t) t.name=val;
-}
-function updateDifficulty(id,val){
-  const t=tasks.find(x=>x.id===id);
-  if(t) t.difficulty=Number(val);
-}
 
 /* ========= TASKS ========= */
 function addTask(){ createTask("task"); }
@@ -64,12 +161,11 @@ function renderTasks(){
     div.innerHTML=`
       ${t.type==="task"?`
         <label>Task Name</label>
-        <input value="${t.name}"
-          oninput="updateName(${t.id},this.value)">
+        <input value="${t.name}" oninput="t.name=this.value">
         <label>Difficulty (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
           value="${t.difficulty}"
-          onchange="updateDifficulty(${t.id},this.value)">
+          onchange="t.difficulty=Number(this.value)">
       `:`<strong>Break</strong>`}
       <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
       <button onclick="start(${t.id})">Start</button>
@@ -84,16 +180,16 @@ function stop(){ activeTask=null; }
 
 /* ========= CORE LOOP ========= */
 function tick(){
+  if(!sessionStart) return;
+
   const elapsed=Math.floor((Date.now()-sessionStart)/1000);
-  sessionTime.textContent=
-    `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
+  sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
 
   if(activeTask){
     const t=tasks.find(x=>x.id===activeTask);
     if(t) t.seconds++;
   }
 
-  renderTasks();
   computeCLI();
 }
 
@@ -116,7 +212,7 @@ function computeCLI(){
 
     t.cliContribution=load;
     if(load>0 && t.type==="task"){
-      contributors.push({ name:t.name||"Task", load });
+      contributors.push({ name: t.name || "Task", load });
     }
 
     totalLoad+=load;
@@ -132,39 +228,62 @@ function computeCLI(){
   if(cliLog.length>10){
     const a=cliLog.at(-1);
     const b=cliLog.at(-10);
-    cliRate.textContent=
-      ((a.cli-b.cli)/((a.time-b.time)/60000)).toFixed(2);
+    const rate=((a.cli-b.cli)/((a.time-b.time)/60000)).toFixed(2);
+    cliRate.textContent=rate;
   }
 
   updateChart(contributors);
 }
 
-/* ========= PIE ========= */
+/* ========= PIE CHART ========= */
 function initChart(){
   chart=new Chart(pieChart,{
     type:"pie",
-    data:{ labels:["Idle"], datasets:[{data:[1],backgroundColor:["#2a2d3e"]}] },
+    data:{
+      labels:["Idle"],
+      datasets:[{
+        data:[1],
+        backgroundColor:["#2a2d3e"],
+        borderWidth:0
+      }]
+    },
     options:{
+      responsive:true,
       animation:false,
-      plugins:{legend:{position:"bottom",labels:{color:"#eaeaf0"}}}
+      plugins:{
+        legend:{
+          position:"bottom",
+          labels:{ color:"#eaeaf0", padding:12 }
+        }
+      },
+      layout:{ padding:10 }
     }
   });
 }
 
 function updateChart(contributors){
-  if(!contributors.length){
+  if(!chart) return;
+
+  if(contributors.length===0){
     chart.data.labels=["Idle"];
     chart.data.datasets[0].data=[1];
-    chart.update(); return;
+    chart.data.datasets[0].backgroundColor=["#2a2d3e"];
+    chart.update();
+    return;
   }
 
   const total=contributors.reduce((s,c)=>s+c.load,0);
+
   chart.data.labels=contributors.map(c=>c.name);
   chart.data.datasets[0].data=
-    contributors.length===1?[1]:contributors.map(c=>c.load/total);
+    contributors.length===1
+      ? [1]
+      : contributors.map(c=>c.load/total);
+
   chart.data.datasets[0].backgroundColor=[
     "#5b7cff","#22c55e","#f97316","#ec4899","#a855f7"
   ];
+
   chart.update();
 }
 
@@ -178,8 +297,7 @@ function exportCSV(){
 }
 
 function exportJSON(){
-  download(JSON.stringify({tasks,cliLog},null,2),
-           "loadline.json","application/json");
+  download(JSON.stringify({tasks,cliLog},null,2),"loadline.json","application/json");
 }
 
 function download(data,name,type){
@@ -190,4 +308,5 @@ function download(data,name,type){
   a.click();
 }
 </script>
-
+</body>
+</html>
