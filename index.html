@@ -189,7 +189,7 @@ function tick(){
     const t=tasks.find(x=>x.id===activeTask);
     if(t) t.seconds++;
   }
-
+  renderTasks(); 
   computeCLI();
 }
 
@@ -310,3 +310,4 @@ function download(data,name,type){
 </script>
 </body>
 </html>
+
