@@ -124,112 +124,134 @@ function unlock(){
     sessionStart = Date.now();
     globalTimer = setInterval(tick,1000);
     initChart();
-  } else error.textContent="Invalid access code.";
+  } else {
+    error.textContent="Invalid access code.";
+  }
 }
 
 /* ========= STATE ========= */
-let tasks=[];
-let activeTask=null;
-let sessionStart=null;
-let globalTimer=null;
-let cliPeak=0;
-let cliLog=[];
-let chart=null;
+let tasks = [];
+let activeTask = null;
+let sessionStart = null;
+let globalTimer = null;
+let cliPeak = 0;
+let cliLog = [];
+let chart = null;
 
-/* ========= TASKS ========= */
+/* ========= TASK MANAGEMENT ========= */
 function addTask(){ createTask("task"); }
 function addBreak(){ createTask("break"); }
 
 function createTask(type){
   tasks.push({
-    id:Date.now()+Math.random(),
+    id: Date.now() + Math.random(),
     type,
-    name:type==="break"?"Break":"",
-    difficulty:type==="break"?0:0.5,
-    seconds:0,
-    cliContribution:0
+    name: type === "break" ? "Break" : "",
+    difficulty: type === "break" ? 0 : 0.5,
+    seconds: 0,
+    cliContribution: 0
   });
   renderTasks();
 }
 
+function updateTaskName(id,value){
+  const t = tasks.find(x => x.id === id);
+  if(t) t.name = value;
+}
+
+function updateTaskDifficulty(id,value){
+  const t = tasks.find(x => x.id === id);
+  if(t) t.difficulty = Number(value);
+}
+
 function renderTasks(){
-  const el=document.getElementById("tasks");
-  el.innerHTML="";
-  tasks.forEach(t=>{
-    const div=document.createElement("div");
-    div.className="task"+(activeTask===t.id?" active":"");
-    div.innerHTML=`
-      ${t.type==="task"?`
+  const el = document.getElementById("tasks");
+  el.innerHTML = "";
+
+  tasks.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "task" + (activeTask === t.id ? " active" : "");
+
+    div.innerHTML = `
+      ${t.type === "task" ? `
         <label>Task Name</label>
-        <input value="${t.name}" oninput="t.name=this.value">
+        <input value="${t.name}"
+               oninput="updateTaskName(${t.id}, this.value)">
         <label>Difficulty (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
-          value="${t.difficulty}"
-          onchange="t.difficulty=Number(this.value)">
-      `:`<strong>Break</strong>`}
-      <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
-      <button onclick="start(${t.id})">Start</button>
-      <button class="secondary" onclick="stop()">Stop</button>
+               value="${t.difficulty}"
+               onchange="updateTaskDifficulty(${t.id}, this.value)">
+      ` : `<strong>Break</strong>`}
+
+      <div class="metric">
+        ⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}
+      </div>
+
+      <button onclick="startTask(${t.id})">Start</button>
+      <button class="secondary" onclick="stopTask()">Stop</button>
     `;
     el.appendChild(div);
   });
 }
 
-function start(id){ activeTask=id; }
-function stop(){ activeTask=null; }
+function startTask(id){ activeTask = id; }
+function stopTask(){ activeTask = null; }
 
 /* ========= CORE LOOP ========= */
 function tick(){
   if(!sessionStart) return;
 
-  const elapsed=Math.floor((Date.now()-sessionStart)/1000);
-  sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
+  const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+  sessionTime.textContent =
+    `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
 
   if(activeTask){
-    const t=tasks.find(x=>x.id===activeTask);
+    const t = tasks.find(x => x.id === activeTask);
     if(t) t.seconds++;
   }
 
   computeCLI();
+  renderTasks();
 }
 
 /* ========= CLI MODEL ========= */
 function computeCLI(){
-  let totalLoad=0;
-  let contributors=[];
+  let totalLoad = 0;
+  let contributors = [];
 
-  tasks.forEach(t=>{
-    let load=0;
+  tasks.forEach(t => {
+    let load = 0;
 
-    if(t.type==="task"){
-      const timeFactor=Math.min(t.seconds/1800,1);
-      load=(t.difficulty+timeFactor)/2;
+    if(t.type === "task"){
+      const timeFactor = Math.min(t.seconds / 1800, 1);
+      load = (t.difficulty + timeFactor) / 2;
     }
 
-    if(t.type==="break" && activeTask===t.id){
-      load=-0.015 * t.seconds;
+    if(t.type === "break" && activeTask === t.id){
+      load = -0.015 * t.seconds;
     }
 
-    t.cliContribution=load;
-    if(load>0 && t.type==="task"){
+    t.cliContribution = load;
+    totalLoad += load;
+
+    if(load > 0 && t.type === "task"){
       contributors.push({ name: t.name || "Task", load });
     }
-
-    totalLoad+=load;
   });
 
-  const CLI=Math.max(0,Math.min(100,totalLoad*30));
-  cliPeak=Math.max(cliPeak,CLI);
-  cliLog.push({time:Date.now(),cli:CLI});
+  const CLI = Math.max(0, Math.min(100, totalLoad * 30));
+  cliPeak = Math.max(cliPeak, CLI);
+  cliLog.push({ time: Date.now(), cli: CLI });
 
-  cliValue.textContent=Math.round(CLI);
-  cliPeak.textContent=Math.round(cliPeak);
+  cliValue.textContent = Math.round(CLI);
+  cliPeak.textContent = Math.round(cliPeak);
 
-  if(cliLog.length>10){
-    const a=cliLog.at(-1);
-    const b=cliLog.at(-10);
-    const rate=((a.cli-b.cli)/((a.time-b.time)/60000)).toFixed(2);
-    cliRate.textContent=rate;
+  if(cliLog.length > 10){
+    const a = cliLog.at(-1);
+    const b = cliLog.at(-10);
+    const rate =
+      ((a.cli - b.cli) / ((a.time - b.time) / 60000)).toFixed(2);
+    cliRate.textContent = rate;
   }
 
   updateChart(contributors);
@@ -237,7 +259,7 @@ function computeCLI(){
 
 /* ========= PIE CHART ========= */
 function initChart(){
-  chart=new Chart(pieChart,{
+  chart = new Chart(pieChart,{
     type:"pie",
     data:{
       labels:["Idle"],
@@ -255,8 +277,7 @@ function initChart(){
           position:"bottom",
           labels:{ color:"#eaeaf0", padding:12 }
         }
-      },
-      layout:{ padding:10 }
+      }
     }
   });
 }
@@ -264,47 +285,46 @@ function initChart(){
 function updateChart(contributors){
   if(!chart) return;
 
-  if(contributors.length===0){
-    chart.data.labels=["Idle"];
-    chart.data.datasets[0].data=[1];
-    chart.data.datasets[0].backgroundColor=["#2a2d3e"];
+  if(contributors.length === 0){
+    chart.data.labels = ["Idle"];
+    chart.data.datasets[0].data = [1];
     chart.update();
     return;
   }
 
-  const total=contributors.reduce((s,c)=>s+c.load,0);
+  if(contributors.length === 1){
+    chart.data.labels = [contributors[0].name];
+    chart.data.datasets[0].data = [1];
+    chart.update();
+    return;
+  }
 
-  chart.data.labels=contributors.map(c=>c.name);
-  chart.data.datasets[0].data=
-    contributors.length===1
-      ? [1]
-      : contributors.map(c=>c.load/total);
-
-  chart.data.datasets[0].backgroundColor=[
-    "#5b7cff","#22c55e","#f97316","#ec4899","#a855f7"
-  ];
-
+  const total = contributors.reduce((s,c)=>s+c.load,0);
+  chart.data.labels = contributors.map(c=>c.name);
+  chart.data.datasets[0].data =
+    contributors.map(c=>c.load / total);
   chart.update();
 }
 
 /* ========= EXPORT ========= */
 function exportCSV(){
-  let csv="time,task,type,difficulty,seconds,cli\n";
+  let csv = "time,task,type,difficulty,seconds,cli\n";
   tasks.forEach(t=>{
-    csv+=`${Date.now()},${t.name},${t.type},${t.difficulty},${t.seconds},${t.cliContribution}\n`;
+    csv += `${Date.now()},${t.name},${t.type},${t.difficulty},${t.seconds},${t.cliContribution}\n`;
   });
   download(csv,"loadline.csv","text/csv");
 }
 
 function exportJSON(){
-  download(JSON.stringify({tasks,cliLog},null,2),"loadline.json","application/json");
+  download(JSON.stringify({tasks,cliLog},null,2),
+           "loadline.json","application/json");
 }
 
 function download(data,name,type){
-  const blob=new Blob([data],{type});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download=name;
+  const blob = new Blob([data],{type});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
   a.click();
 }
 </script>
