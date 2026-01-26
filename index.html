@@ -24,7 +24,7 @@ body {
 }
 h1 { font-size:2.2rem; margin-bottom:0; }
 h2 { margin-top:0; }
-.metric { color:#b3b3c6; margin-top:0.25rem; }
+.metric { color:#b3b3c6; font-size:0.9rem; }
 button {
   background:#5b7cff;
   border:none;
@@ -38,9 +38,6 @@ button {
 button.secondary { background:#2a2d3e; }
 input[type="range"], select {
   width:100%;
-  margin-top:0.25rem;
-  background:#222431;
-  color:#fff;
 }
 .task {
   border-top:1px solid #2a2d3e;
@@ -86,24 +83,27 @@ canvas { max-width:100%; margin-top:1rem; }
     <label class="metric">Noise Mode</label>
     <select id="noiseMode">
       <option value="none">None (Baseline)</option>
-      <option value="gaussian">Gaussian Noise</option>
+      <option value="gaussian">Gaussian</option>
       <option value="spike">Motion Spikes</option>
-      <option value="drift">Signal Drift</option>
+      <option value="drift">Drift</option>
     </select>
 
     <label class="metric">Noise Intensity</label>
     <input type="range" min="0" max="1" step="0.05" id="noiseLevel" />
 
     <label class="metric">
-      <input type="checkbox" id="smoothingToggle" /> CLI Smoothing
+      <input type="checkbox" id="smoothingToggle" /> CLI smoothing
     </label>
   </div>
 
   <div class="card">
     <h2>Tasks</h2>
     <div id="tasks"></div>
+
     <button onclick="addTask()">+ Add Task</button>
-    <button class="secondary" onclick="addBreak()">+ Add Break</button>
+    <button class="secondary" onclick="addPreset('Coding')">Coding</button>
+    <button class="secondary" onclick="addPreset('Studying')">Studying</button>
+    <button class="secondary" onclick="addPreset('Reading')">Reading</button>
   </div>
 
   <div class="card">
@@ -114,10 +114,20 @@ canvas { max-width:100%; margin-top:1rem; }
 
 <script>
 const VALID_CODES = ["turtle123"];
-const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7"];
-let tasks=[], activeTask=null, sessionStart=null, cliLog=[], cliPeak=0, chart=null, taskCounter=1;
-let smoothCLI=0;
+const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7","#06b6d4"];
+let tasks = [];
+let activeTask = null;
+let sessionStart = null;
+let cliLog = [];
+let cliPeak = 0;
+let chart = null;
+let taskCounter = 1;
+let smoothCLI = 0;
 
+const tasksDiv = document.getElementById("tasks");
+const cliPeakEl = document.getElementById("cliPeak");
+
+/* ---------- ACCESS ---------- */
 function unlock(){
   if(VALID_CODES.includes(accessCode.value)){
     gate.style.display="none";
@@ -128,18 +138,23 @@ function unlock(){
   } else error.textContent="Invalid access code.";
 }
 
-function addTask(){ createTask("task"); }
-function addBreak(){ createTask("break"); }
+/* ---------- TASKS ---------- */
+function addTask(){
+  createTask(`Task ${taskCounter++}`, 0.5);
+}
 
-function createTask(type){
+function addPreset(name){
+  createTask(name, 0.6);
+}
+
+function createTask(name, difficulty){
   tasks.push({
-    id:Date.now()+Math.random(),
-    type,
-    name:type==="task"?`Task ${taskCounter++}`:"Break",
-    difficulty:type==="task"?0.5:0,
-    seconds:0,
-    color:COLORS[tasks.length%COLORS.length],
-    cliContribution:0
+    id: Date.now()+Math.random(),
+    name,
+    difficulty,
+    seconds: 0,
+    cliContribution: 0,
+    color: COLORS[tasks.length % COLORS.length]
   });
   renderTasks();
 }
@@ -151,80 +166,99 @@ function renderTasks(){
     d.className="task"+(activeTask===t.id?" active":"");
     d.innerHTML=`
       <strong style="color:${t.color}">${t.name}</strong>
-      ${t.type==="task"?`
+
       <input type="range" min="0" max="1" step="0.05"
-       value="${t.difficulty}"
-       oninput="tweak(${t.id},this.value)">`:``}
+        value="${t.difficulty}"
+        oninput="setDiff(${t.id},this.value)">
+
       <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
+
       <button onclick="activeTask=${t.id}">Start</button>
-      <button class="secondary" onclick="activeTask=null">Stop</button>`;
+      <button class="secondary" onclick="activeTask=null">Stop</button>
+    `;
     tasksDiv.appendChild(d);
   });
 }
-function tweak(id,v){ const t=tasks.find(x=>x.id===id); if(t)t.difficulty=+v; }
 
+function setDiff(id,val){
+  const t=tasks.find(x=>x.id===id);
+  if(t) t.difficulty=+val;
+}
+
+/* ---------- LOOP ---------- */
 function tick(){
-  const e=Math.floor((Date.now()-sessionStart)/1000);
-  sessionTime.textContent=`${Math.floor(e/60)}:${String(e%60).padStart(2,"0")}`;
-  if(activeTask){ const t=tasks.find(x=>x.id===activeTask); if(t)t.seconds++; }
+  const elapsed=Math.floor((Date.now()-sessionStart)/1000);
+  sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
+
+  if(activeTask){
+    const t=tasks.find(x=>x.id===activeTask);
+    if(t) t.seconds++;
+  }
   computeCLI();
 }
 
+/* ---------- NOISE ---------- */
 function applyNoise(v){
-  const m=noiseMode.value, n=+noiseLevel.value;
-  if(m==="gaussian") return v+(Math.random()-0.5)*n;
-  if(m==="spike" && Math.random()<0.05) return v+n*3;
-  if(m==="drift") return v+n*((Date.now()%10000)/10000);
+  const mode=noiseMode.value;
+  const lvl=+noiseLevel.value;
+  if(mode==="gaussian") return v+(Math.random()-0.5)*lvl;
+  if(mode==="spike" && Math.random()<0.05) return v+lvl*3;
+  if(mode==="drift") return v+lvl*((Date.now()%10000)/10000);
   return v;
 }
 
+/* ---------- CLI ---------- */
 function computeCLI(){
-  let total=0, contrib=[];
+  let total=0;
+  let contributors=[];
+
   tasks.forEach(t=>{
-    let l=0;
-    if(t.type==="task"){
-      l=(t.difficulty+Math.min(t.seconds/1800,1))/2;
-      l=applyNoise(l);
-      contrib.push(t);
-    }
-    t.cliContribution=l;
-    total+=l;
+    let load=(t.difficulty+Math.min(t.seconds/1800,1))/2;
+    load=applyNoise(load);
+    t.cliContribution=load;
+    total+=load;
+    contributors.push(t);
   });
 
   let CLI=Math.max(0,Math.min(100,total*30));
   if(smoothingToggle.checked){
-    smoothCLI=0.8*smoothCLI+0.2*CLI;
+    smoothCLI=0.85*smoothCLI+0.15*CLI;
     CLI=smoothCLI;
   }
 
   cliPeak=Math.max(cliPeak,CLI);
-  cliLog.push({
-    time:Date.now(), cli:CLI,
-    noise:noiseMode.value, level:+noiseLevel.value
-  });
-
   cliValue.textContent=Math.round(CLI);
   cliPeakEl.textContent=Math.round(cliPeak);
-  updateChart(contrib);
+
+  cliLog.push({
+    time:Date.now(),
+    cli:CLI,
+    noise:noiseMode.value,
+    level:+noiseLevel.value
+  });
+
+  updateChart(contributors);
 }
 
+/* ---------- CHART ---------- */
 function initChart(){
   chart=new Chart(pieChart,{
     type:"pie",
-    data:{labels:["Idle"],datasets:[{data:[1],backgroundColor:["#2a2d3e"]}]},
+    data:{labels:[],datasets:[{data:[],backgroundColor:[]}]},
     options:{plugins:{legend:{labels:{color:"#eaeaf0"}}}}
   });
 }
 
 function updateChart(c){
-  if(!c.length){ chart.data.labels=["Idle"]; chart.data.datasets[0].data=[1]; chart.update(); return;}
-  const s=c.reduce((a,b)=>a+b.cliContribution,0);
+  if(!c.length) return;
+  const sum=c.reduce((a,b)=>a+b.cliContribution,0);
   chart.data.labels=c.map(x=>x.name);
-  chart.data.datasets[0].data=c.map(x=>x.cliContribution/s);
+  chart.data.datasets[0].data=c.map(x=>x.cliContribution/sum);
   chart.data.datasets[0].backgroundColor=c.map(x=>x.color);
   chart.update();
 }
 
+/* ---------- EXPORT ---------- */
 function exportJSON(){
   const payload={
     tasks, cliLog,
@@ -234,13 +268,12 @@ function exportJSON(){
       smoothing:smoothingToggle.checked
     }
   };
-  const b=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(b);
+  a.href=URL.createObjectURL(blob);
   a.download="loadline_experiment.json";
   a.click();
 }
 </script>
 </body>
 </html>
-
