@@ -115,6 +115,7 @@ canvas { max-width:100%; margin-top:1rem; }
 <script>
 const VALID_CODES = ["turtle123"];
 const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7","#06b6d4"];
+
 let tasks = [];
 let activeTask = null;
 let sessionStart = null;
@@ -123,6 +124,10 @@ let cliPeak = 0;
 let chart = null;
 let taskCounter = 1;
 let smoothCLI = 0;
+
+// 🔥 NEW
+let lastCLI = null;
+let recoverySamples = [];
 
 const tasksDiv = document.getElementById("tasks");
 const cliPeakEl = document.getElementById("cliPeak");
@@ -139,29 +144,47 @@ function unlock(){
 }
 
 /* ---------- TASKS ---------- */
-function addTask(){
-  createTask(`Task ${taskCounter++}`, 0.5);
-}
+function addTask(){ createTask(`Task ${taskCounter++}`,0.5); }
+function addPreset(name){ createTask(name,0.6); }
 
-function addPreset(name){
-  createTask(name, 0.6);
-}
-
-function createTask(name, difficulty){
+function createTask(name,difficulty){
   tasks.push({
     id: Date.now()+Math.random(),
     name,
     difficulty,
-    seconds: 0,
+    totalSeconds: 0,
+    lastStart: null,
     cliContribution: 0,
     color: COLORS[tasks.length % COLORS.length]
   });
   renderTasks();
 }
 
+function startTask(id){
+  if(activeTask) stopTask(activeTask);
+  const t=tasks.find(x=>x.id===id);
+  if(!t) return;
+  t.lastStart=Date.now();
+  activeTask=id;
+  renderTasks();
+}
+
+function stopTask(id){
+  const t=tasks.find(x=>x.id===id);
+  if(t && t.lastStart){
+    t.totalSeconds += Math.floor((Date.now()-t.lastStart)/1000);
+    t.lastStart=null;
+  }
+  activeTask=null;
+  renderTasks();
+}
+
 function renderTasks(){
   tasksDiv.innerHTML="";
   tasks.forEach(t=>{
+    const running = t.lastStart !== null;
+    const secs = t.totalSeconds + (running ? Math.floor((Date.now()-t.lastStart)/1000) : 0);
+
     const d=document.createElement("div");
     d.className="task"+(activeTask===t.id?" active":"");
     d.innerHTML=`
@@ -169,32 +192,23 @@ function renderTasks(){
 
       <input type="range" min="0" max="1" step="0.05"
         value="${t.difficulty}"
-        oninput="setDiff(${t.id},this.value)">
+        oninput="t.difficulty=this.value">
 
-      <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
+      <div class="metric">⏱ ${Math.floor(secs/60)}:${String(secs%60).padStart(2,"0")}</div>
 
-      <button onclick="activeTask=${t.id}">Start</button>
-      <button class="secondary" onclick="activeTask=null">Stop</button>
+      <button onclick="startTask(${t.id})">Start</button>
+      <button class="secondary" onclick="stopTask(${t.id})">Stop</button>
     `;
     tasksDiv.appendChild(d);
   });
-}
-
-function setDiff(id,val){
-  const t=tasks.find(x=>x.id===id);
-  if(t) t.difficulty=+val;
 }
 
 /* ---------- LOOP ---------- */
 function tick(){
   const elapsed=Math.floor((Date.now()-sessionStart)/1000);
   sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
-
-  if(activeTask){
-    const t=tasks.find(x=>x.id===activeTask);
-    if(t) t.seconds++;
-  }
   computeCLI();
+  renderTasks(); // 🔥 keeps timer smooth
 }
 
 /* ---------- NOISE ---------- */
@@ -207,13 +221,14 @@ function applyNoise(v){
   return v;
 }
 
-/* ---------- CLI ---------- */
+/* ---------- CLI + RECOVERY ---------- */
 function computeCLI(){
   let total=0;
   let contributors=[];
 
   tasks.forEach(t=>{
-    let load=(t.difficulty+Math.min(t.seconds/1800,1))/2;
+    const secs = t.totalSeconds + (t.lastStart ? Math.floor((Date.now()-t.lastStart)/1000) : 0);
+    let load=(t.difficulty+Math.min(secs/1800,1))/2;
     load=applyNoise(load);
     t.cliContribution=load;
     total+=load;
@@ -221,10 +236,17 @@ function computeCLI(){
   });
 
   let CLI=Math.max(0,Math.min(100,total*30));
+
   if(smoothingToggle.checked){
     smoothCLI=0.85*smoothCLI+0.15*CLI;
     CLI=smoothCLI;
   }
+
+  // 🔥 Cognitive Recovery Index
+  if(lastCLI !== null && activeTask===null){
+    recoverySamples.push(Math.max(0,lastCLI-CLI));
+  }
+  lastCLI=CLI;
 
   cliPeak=Math.max(cliPeak,CLI);
   cliValue.textContent=Math.round(CLI);
@@ -233,11 +255,16 @@ function computeCLI(){
   cliLog.push({
     time:Date.now(),
     cli:CLI,
-    noise:noiseMode.value,
-    level:+noiseLevel.value
+    recoveryIndex: getCRI(),
+    noise:noiseMode.value
   });
 
   updateChart(contributors);
+}
+
+function getCRI(){
+  if(!recoverySamples.length) return 0;
+  return +(recoverySamples.reduce((a,b)=>a+b,0)/recoverySamples.length).toFixed(2);
 }
 
 /* ---------- CHART ---------- */
@@ -250,8 +277,7 @@ function initChart(){
 }
 
 function updateChart(c){
-  if(!c.length) return;
-  const sum=c.reduce((a,b)=>a+b.cliContribution,0);
+  const sum=c.reduce((a,b)=>a+b.cliContribution,0)||1;
   chart.data.labels=c.map(x=>x.name);
   chart.data.datasets[0].data=c.map(x=>x.cliContribution/sum);
   chart.data.datasets[0].backgroundColor=c.map(x=>x.color);
@@ -261,7 +287,9 @@ function updateChart(c){
 /* ---------- EXPORT ---------- */
 function exportJSON(){
   const payload={
-    tasks, cliLog,
+    tasks,
+    cliLog,
+    cognitiveRecoveryIndex: getCRI(),
     experiment:{
       noiseMode:noiseMode.value,
       noiseLevel:+noiseLevel.value,
@@ -277,3 +305,4 @@ function exportJSON(){
 </script>
 </body>
 </html>
+
