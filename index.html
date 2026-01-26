@@ -4,20 +4,17 @@
 <meta charset="UTF-8" />
 <title>LOADLINE v2 — Cognitive Load Index</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 * { box-sizing: border-box; }
-
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: system-ui, sans-serif;
   background:#0e0f12;
   color:#eaeaf0;
   margin:0;
   padding:1rem;
 }
-
 .container { max-width:1000px; margin:auto; }
 .card {
   background:#161820;
@@ -25,11 +22,9 @@ body {
   padding:1.25rem;
   margin-top:1.25rem;
 }
-
 h1 { font-size:2.2rem; margin-bottom:0; }
 h2 { margin-top:0; }
 .metric { color:#b3b3c6; margin-top:0.25rem; }
-
 button {
   background:#5b7cff;
   border:none;
@@ -40,39 +35,24 @@ button {
   cursor:pointer;
   margin-top:0.5rem;
 }
-
 button.secondary { background:#2a2d3e; }
-
-input {
+input[type="range"], select {
   width:100%;
-  padding:0.55rem;
-  border-radius:6px;
-  border:none;
+  margin-top:0.25rem;
   background:#222431;
   color:#fff;
-  margin-top:0.25rem;
 }
-
 .task {
   border-top:1px solid #2a2d3e;
   padding-top:1rem;
   margin-top:1rem;
 }
-
 .task.active {
   border-left:4px solid #5b7cff;
   padding-left:0.75rem;
 }
-
-.result {
-  font-size:3rem;
-  font-weight:800;
-}
-
-canvas {
-  max-width:100%;
-  margin-top:1rem;
-}
+.result { font-size:3rem; font-weight:800; }
+canvas { max-width:100%; margin-top:1rem; }
 </style>
 </head>
 
@@ -81,7 +61,6 @@ canvas {
 <div class="container" id="gate">
   <div class="card">
     <h1>LOADLINE</h1>
-    <p class="metric">Pilot Access</p>
     <input id="accessCode" type="password" placeholder="Access code" />
     <button onclick="unlock()">Enter</button>
     <p id="error" style="color:#f87171;"></p>
@@ -94,10 +73,30 @@ canvas {
   <div class="card">
     <h2>Live Cognitive Load</h2>
     <div class="result" id="cliValue">—</div>
-    <div class="metric">⏱ Time Active: <span id="sessionTime">0:00</span></div>
+    <div class="metric">⏱ <span id="sessionTime">0:00</span></div>
     <div class="metric">📈 CLI / min: <span id="cliRate">—</span></div>
-    <div class="metric">🔥 Peak CLI: <span id="cliPeak">—</span></div>
+    <div class="metric">🔥 Peak: <span id="cliPeak">—</span></div>
     <canvas id="pieChart"></canvas>
+  </div>
+
+  <!-- 🔬 EXPERIMENT CONTROLS -->
+  <div class="card">
+    <h2>Experiment Controls</h2>
+
+    <label class="metric">Noise Mode</label>
+    <select id="noiseMode">
+      <option value="none">None (Baseline)</option>
+      <option value="gaussian">Gaussian Noise</option>
+      <option value="spike">Motion Spikes</option>
+      <option value="drift">Signal Drift</option>
+    </select>
+
+    <label class="metric">Noise Intensity</label>
+    <input type="range" min="0" max="1" step="0.05" id="noiseLevel" />
+
+    <label class="metric">
+      <input type="checkbox" id="smoothingToggle" /> CLI Smoothing
+    </label>
   </div>
 
   <div class="card">
@@ -109,222 +108,136 @@ canvas {
 
   <div class="card">
     <h2>Export</h2>
-    <button onclick="exportCSV()">Export CSV</button>
-    <button class="secondary" onclick="exportJSON()">Export JSON</button>
+    <button onclick="exportJSON()">Export JSON</button>
   </div>
 </div>
 
 <script>
-/* ========= ACCESS ========= */
 const VALID_CODES = ["turtle123"];
+const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7"];
+let tasks=[], activeTask=null, sessionStart=null, cliLog=[], cliPeak=0, chart=null, taskCounter=1;
+let smoothCLI=0;
+
 function unlock(){
   if(VALID_CODES.includes(accessCode.value)){
     gate.style.display="none";
     app.style.display="block";
     sessionStart = Date.now();
-    globalTimer = setInterval(tick,1000);
+    setInterval(tick,1000);
     initChart();
-  } else {
-    error.textContent="Invalid access code.";
-  }
+  } else error.textContent="Invalid access code.";
 }
 
-/* ========= STATE ========= */
-let tasks = [];
-let activeTask = null;
-let sessionStart = null;
-let globalTimer = null;
-let cliPeak = 0;
-let cliLog = [];
-let chart = null;
-
-/* ========= TASK MANAGEMENT ========= */
 function addTask(){ createTask("task"); }
 function addBreak(){ createTask("break"); }
 
 function createTask(type){
   tasks.push({
-    id: Date.now() + Math.random(),
+    id:Date.now()+Math.random(),
     type,
-    name: type === "break" ? "Break" : "",
-    difficulty: type === "break" ? 0 : 0.5,
-    seconds: 0,
-    cliContribution: 0
+    name:type==="task"?`Task ${taskCounter++}`:"Break",
+    difficulty:type==="task"?0.5:0,
+    seconds:0,
+    color:COLORS[tasks.length%COLORS.length],
+    cliContribution:0
   });
   renderTasks();
-}
-
-function updateTaskName(id,value){
-  const t = tasks.find(x => x.id === id);
-  if(t) t.name = value;
-}
-
-function updateTaskDifficulty(id,value){
-  const t = tasks.find(x => x.id === id);
-  if(t) t.difficulty = Number(value);
 }
 
 function renderTasks(){
-  const el = document.getElementById("tasks");
-  el.innerHTML = "";
-
-  tasks.forEach(t => {
-    const div = document.createElement("div");
-    div.className = "task" + (activeTask === t.id ? " active" : "");
-
-    div.innerHTML = `
-      ${t.type === "task" ? `
-        <label>Task Name</label>
-        <input value="${t.name}"
-               oninput="updateTaskName(${t.id}, this.value)">
-        <label>Difficulty (0–1)</label>
-        <input type="number" min="0" max="1" step="0.1"
-               value="${t.difficulty}"
-               onchange="updateTaskDifficulty(${t.id}, this.value)">
-      ` : `<strong>Break</strong>`}
-
-      <div class="metric">
-        ⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}
-      </div>
-
-      <button onclick="startTask(${t.id})">Start</button>
-      <button class="secondary" onclick="stopTask()">Stop</button>
-    `;
-    el.appendChild(div);
+  tasksDiv.innerHTML="";
+  tasks.forEach(t=>{
+    const d=document.createElement("div");
+    d.className="task"+(activeTask===t.id?" active":"");
+    d.innerHTML=`
+      <strong style="color:${t.color}">${t.name}</strong>
+      ${t.type==="task"?`
+      <input type="range" min="0" max="1" step="0.05"
+       value="${t.difficulty}"
+       oninput="tweak(${t.id},this.value)">`:``}
+      <div class="metric">⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}</div>
+      <button onclick="activeTask=${t.id}">Start</button>
+      <button class="secondary" onclick="activeTask=null">Stop</button>`;
+    tasksDiv.appendChild(d);
   });
 }
+function tweak(id,v){ const t=tasks.find(x=>x.id===id); if(t)t.difficulty=+v; }
 
-function startTask(id){ activeTask = id; }
-function stopTask(){ activeTask = null; }
-
-/* ========= CORE LOOP ========= */
 function tick(){
-  if(!sessionStart) return;
-
-  const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
-  sessionTime.textContent =
-    `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
-
-  if(activeTask){
-    const t = tasks.find(x => x.id === activeTask);
-    if(t) t.seconds++;
-  }
-
+  const e=Math.floor((Date.now()-sessionStart)/1000);
+  sessionTime.textContent=`${Math.floor(e/60)}:${String(e%60).padStart(2,"0")}`;
+  if(activeTask){ const t=tasks.find(x=>x.id===activeTask); if(t)t.seconds++; }
   computeCLI();
-  renderTasks();
 }
 
-/* ========= CLI MODEL ========= */
+function applyNoise(v){
+  const m=noiseMode.value, n=+noiseLevel.value;
+  if(m==="gaussian") return v+(Math.random()-0.5)*n;
+  if(m==="spike" && Math.random()<0.05) return v+n*3;
+  if(m==="drift") return v+n*((Date.now()%10000)/10000);
+  return v;
+}
+
 function computeCLI(){
-  let totalLoad = 0;
-  let contributors = [];
-
-  tasks.forEach(t => {
-    let load = 0;
-
-    if(t.type === "task"){
-      const timeFactor = Math.min(t.seconds / 1800, 1);
-      load = (t.difficulty + timeFactor) / 2;
+  let total=0, contrib=[];
+  tasks.forEach(t=>{
+    let l=0;
+    if(t.type==="task"){
+      l=(t.difficulty+Math.min(t.seconds/1800,1))/2;
+      l=applyNoise(l);
+      contrib.push(t);
     }
-
-    if(t.type === "break" && activeTask === t.id){
-      load = -0.015 * t.seconds;
-    }
-
-    t.cliContribution = load;
-    totalLoad += load;
-
-    if(load > 0 && t.type === "task"){
-      contributors.push({ name: t.name || "Task", load });
-    }
+    t.cliContribution=l;
+    total+=l;
   });
 
-  const CLI = Math.max(0, Math.min(100, totalLoad * 30));
-  cliPeak = Math.max(cliPeak, CLI);
-  cliLog.push({ time: Date.now(), cli: CLI });
-
-  cliValue.textContent = Math.round(CLI);
-  cliPeak.textContent = Math.round(cliPeak);
-
-  if(cliLog.length > 10){
-    const a = cliLog.at(-1);
-    const b = cliLog.at(-10);
-    const rate =
-      ((a.cli - b.cli) / ((a.time - b.time) / 60000)).toFixed(2);
-    cliRate.textContent = rate;
+  let CLI=Math.max(0,Math.min(100,total*30));
+  if(smoothingToggle.checked){
+    smoothCLI=0.8*smoothCLI+0.2*CLI;
+    CLI=smoothCLI;
   }
 
-  updateChart(contributors);
+  cliPeak=Math.max(cliPeak,CLI);
+  cliLog.push({
+    time:Date.now(), cli:CLI,
+    noise:noiseMode.value, level:+noiseLevel.value
+  });
+
+  cliValue.textContent=Math.round(CLI);
+  cliPeakEl.textContent=Math.round(cliPeak);
+  updateChart(contrib);
 }
 
-/* ========= PIE CHART ========= */
 function initChart(){
-  chart = new Chart(pieChart,{
+  chart=new Chart(pieChart,{
     type:"pie",
-    data:{
-      labels:["Idle"],
-      datasets:[{
-        data:[1],
-        backgroundColor:["#2a2d3e"],
-        borderWidth:0
-      }]
-    },
-    options:{
-      responsive:true,
-      animation:false,
-      plugins:{
-        legend:{
-          position:"bottom",
-          labels:{ color:"#eaeaf0", padding:12 }
-        }
-      }
-    }
+    data:{labels:["Idle"],datasets:[{data:[1],backgroundColor:["#2a2d3e"]}]},
+    options:{plugins:{legend:{labels:{color:"#eaeaf0"}}}}
   });
 }
 
-function updateChart(contributors){
-  if(!chart) return;
-
-  if(contributors.length === 0){
-    chart.data.labels = ["Idle"];
-    chart.data.datasets[0].data = [1];
-    chart.update();
-    return;
-  }
-
-  if(contributors.length === 1){
-    chart.data.labels = [contributors[0].name];
-    chart.data.datasets[0].data = [1];
-    chart.update();
-    return;
-  }
-
-  const total = contributors.reduce((s,c)=>s+c.load,0);
-  chart.data.labels = contributors.map(c=>c.name);
-  chart.data.datasets[0].data =
-    contributors.map(c=>c.load / total);
+function updateChart(c){
+  if(!c.length){ chart.data.labels=["Idle"]; chart.data.datasets[0].data=[1]; chart.update(); return;}
+  const s=c.reduce((a,b)=>a+b.cliContribution,0);
+  chart.data.labels=c.map(x=>x.name);
+  chart.data.datasets[0].data=c.map(x=>x.cliContribution/s);
+  chart.data.datasets[0].backgroundColor=c.map(x=>x.color);
   chart.update();
 }
 
-/* ========= EXPORT ========= */
-function exportCSV(){
-  let csv = "time,task,type,difficulty,seconds,cli\n";
-  tasks.forEach(t=>{
-    csv += `${Date.now()},${t.name},${t.type},${t.difficulty},${t.seconds},${t.cliContribution}\n`;
-  });
-  download(csv,"loadline.csv","text/csv");
-}
-
 function exportJSON(){
-  download(JSON.stringify({tasks,cliLog},null,2),
-           "loadline.json","application/json");
-}
-
-function download(data,name,type){
-  const blob = new Blob([data],{type});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
+  const payload={
+    tasks, cliLog,
+    experiment:{
+      noiseMode:noiseMode.value,
+      noiseLevel:+noiseLevel.value,
+      smoothing:smoothingToggle.checked
+    }
+  };
+  const b=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(b);
+  a.download="loadline_experiment.json";
   a.click();
 }
 </script>
