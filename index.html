@@ -1,62 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>LOADLINE v2 — Cognitive Load Index</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="UTF-8" />
+  <title>LOADLINE v2 — Cognitive Load Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<style>
-* { box-sizing: border-box; }
-body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  background:#0e0f12;
-  color:#eaeaf0;
-  margin:0;
-  padding:1rem;
-}
-.container { max-width:1000px; margin:auto; }
-.card {
-  background:#161820;
-  border-radius:14px;
-  padding:1.25rem;
-  margin-top:1.25rem;
-}
-h1 { font-size:2.2rem; margin-bottom:0; }
-h2 { margin-top:0; }
-.metric { color:#b3b3c6; margin-top:0.25rem; }
-button {
-  background:#5b7cff;
-  border:none;
-  border-radius:8px;
-  padding:0.6rem 1rem;
-  color:#fff;
-  font-weight:600;
-  cursor:pointer;
-  margin-top:0.5rem;
-}
-button.secondary { background:#2a2d3e; }
-input {
-  width:100%;
-  padding:0.55rem;
-  border-radius:6px;
-  border:none;
-  background:#222431;
-  color:#fff;
-  margin-top:0.25rem;
-}
-.task {
-  border-top:1px solid #2a2d3e;
-  padding-top:1rem;
-  margin-top:1rem;
-}
-.task.active {
-  border-left:4px solid #5b7cff;
-  padding-left:0.75rem;
-}
-.result { font-size:3rem; font-weight:800; }
-canvas { max-width:100%; margin-top:1rem; }
-</style>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background:#0e0f12;
+      color:#eaeaf0;
+      margin:0;
+      padding:1rem;
+    }
+    .container { max-width:1000px; margin:auto; }
+    .card {
+      background:#161820;
+      border-radius:14px;
+      padding:1.25rem;
+      margin-top:1.25rem;
+    }
+    h1 { font-size:2.2rem; margin-bottom:0; }
+    h2 { margin-top:0; }
+    .metric { color:#b3b3c6; margin-top:0.25rem; }
+    button {
+      background:#5b7cff;
+      border:none;
+      border-radius:8px;
+      padding:0.6rem 1rem;
+      color:#fff;
+      font-weight:600;
+      cursor:pointer;
+      margin-top:0.5rem;
+    }
+    button.secondary { background:#2a2d3e; }
+    input {
+      width:100%;
+      padding:0.55rem;
+      border-radius:6px;
+      border:none;
+      background:#222431;
+      color:#fff;
+      margin-top:0.25rem;
+    }
+    .task {
+      border-top:1px solid #2a2d3e;
+      padding-top:1rem;
+      margin-top:1rem;
+    }
+    .task.active {
+      border-left:4px solid #5b7cff;
+      padding-left:0.75rem;
+    }
+    .result { font-size:3rem; font-weight:800; }
+    canvas { max-width:100%; margin-top:1rem; }
+  </style>
 </head>
 
 <body>
@@ -98,9 +98,22 @@ canvas { max-width:100%; margin-top:1rem; }
 </div>
 
 <script>
+/* ========= ACCESS ========= */
 const VALID_CODES = ["turtle123"];
-const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7","#06b6d4"];
 
+function unlock(){
+  if(!VALID_CODES.includes(accessCode.value)){
+    error.textContent = "Invalid access code.";
+    return;
+  }
+  gate.style.display = "none";
+  app.style.display = "block";
+  sessionStart = Date.now();
+  globalTimer = setInterval(tick, 1000);
+  initChart();
+}
+
+/* ========= STATE ========= */
 let tasks = [];
 let activeTask = null;
 let sessionStart = null;
@@ -108,20 +121,8 @@ let globalTimer = null;
 let cliPeak = 0;
 let cliLog = [];
 let chart = null;
-let colorIndex = 0;
 
-function unlock(){
-  if(VALID_CODES.includes(accessCode.value)){
-    gate.style.display="none";
-    app.style.display="block";
-    sessionStart = Date.now();
-    globalTimer = setInterval(tick,1000);
-    initChart();
-  } else {
-    error.textContent="Invalid access code.";
-  }
-}
-
+/* ========= TASK MANAGEMENT ========= */
 function addTask(){ createTask("task"); }
 function addBreak(){ createTask("break"); }
 
@@ -132,25 +133,22 @@ function createTask(type){
     name: type === "break" ? "Break" : "",
     difficulty: type === "break" ? 0 : 0.5,
     seconds: 0,
-    cliContribution: 0,
-    color: COLORS[colorIndex++ % COLORS.length]
+    cliContribution: 0
   });
-  renderTasks(true);
+  renderTasks();
 }
 
-function updateTaskName(id,value){
+function updateTaskName(id, value){
   const t = tasks.find(x => x.id === id);
   if(t) t.name = value;
 }
 
-function updateTaskDifficulty(id,value){
+function updateTaskDifficulty(id, value){
   const t = tasks.find(x => x.id === id);
-  if(t) t.difficulty = Number(value);
+  if(t) t.difficulty = Number(value) || 0;
 }
 
-function renderTasks(force=false){
-  if(!force && document.activeElement.tagName === "INPUT") return;
-
+function renderTasks(){
   const el = document.getElementById("tasks");
   el.innerHTML = "";
 
@@ -158,25 +156,27 @@ function renderTasks(force=false){
     const div = document.createElement("div");
     div.className = "task" + (activeTask === t.id ? " active" : "");
 
-    div.innerHTML = `
-      ${t.type === "task" ? `
+    if(t.type === "task"){
+      div.innerHTML = `
         <label>Task Name</label>
-        <input placeholder="e.g. Studying, Coding"
-          value="${t.name}"
-          oninput="updateTaskName(${t.id}, this.value)">
+        <input value="${t.name}" oninput="updateTaskName(${t.id}, this.value)">
         <label>Difficulty (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
           value="${t.difficulty}"
           onchange="updateTaskDifficulty(${t.id}, this.value)">
-      ` : `<strong>Break</strong>`}
+      `;
+    } else {
+      div.innerHTML = `<strong>Break</strong>`;
+    }
 
+    div.innerHTML += `
       <div class="metric">
         ⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}
       </div>
-
       <button onclick="startTask(${t.id})">Start</button>
       <button class="secondary" onclick="stopTask()">Stop</button>
     `;
+
     el.appendChild(div);
   });
 }
@@ -184,7 +184,10 @@ function renderTasks(force=false){
 function startTask(id){ activeTask = id; }
 function stopTask(){ activeTask = null; }
 
+/* ========= CORE LOOP ========= */
 function tick(){
+  if(!sessionStart) return;
+
   const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
   sessionTime.textContent =
     `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
@@ -198,16 +201,19 @@ function tick(){
   renderTasks();
 }
 
+/* ========= CLI MODEL ========= */
 function computeCLI(){
   let totalLoad = 0;
   let contributors = [];
 
   tasks.forEach(t => {
     let load = 0;
+
     if(t.type === "task"){
       const timeFactor = Math.min(t.seconds / 1800, 1);
       load = (t.difficulty + timeFactor) / 2;
     }
+
     if(t.type === "break" && activeTask === t.id){
       load = -0.015 * t.seconds;
     }
@@ -216,7 +222,7 @@ function computeCLI(){
     totalLoad += load;
 
     if(load > 0 && t.type === "task"){
-      contributors.push(t);
+      contributors.push({ name: t.name || "Task", load });
     }
   });
 
@@ -228,50 +234,79 @@ function computeCLI(){
   cliValue.textContent = Math.round(CLI);
   cliPeak.textContent = Math.round(cliPeak);
 
+  if(cliLog.length > 10){
+    const a = cliLog.at(-1);
+    const b = cliLog.at(-10);
+    const rate = (a.cli - b.cli) / ((a.time - b.time) / 60000);
+    cliRate.textContent = rate.toFixed(2);
+  }
+
   updateChart(contributors);
 }
 
+/* ========= PIE CHART ========= */
 function initChart(){
-  chart = new Chart(pieChart,{
-    type:"pie",
-    data:{ labels:["Idle"], datasets:[{ data:[1], backgroundColor:["#2a2d3e"] }]},
-    options:{ plugins:{ legend:{ labels:{ color:"#eaeaf0" }}}}
+  chart = new Chart(pieChart, {
+    type: "pie",
+    data: {
+      labels: ["Idle"],
+      datasets: [{
+        data: [1],
+        backgroundColor: ["#2a2d3e"],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: { color: "#eaeaf0", padding: 12 }
+        }
+      }
+    }
   });
 }
 
 function updateChart(contributors){
+  if(!chart) return;
+
   if(contributors.length === 0){
-    chart.data.labels=["Idle"];
-    chart.data.datasets[0].data=[1];
-    chart.data.datasets[0].backgroundColor=["#2a2d3e"];
+    chart.data.labels = ["Idle"];
+    chart.data.datasets[0].data = [1];
     chart.update();
     return;
   }
 
-  const total = contributors.reduce((s,c)=>s+c.cliContribution,0);
-  chart.data.labels = contributors.map(t=>t.name || "Task");
+  const total = contributors.reduce((s,c)=>s+c.load,0) || 1;
+
+  chart.data.labels = contributors.map(c => c.name);
   chart.data.datasets[0].data =
-    contributors.map(t=>t.cliContribution/total);
-  chart.data.datasets[0].backgroundColor =
-    contributors.map(t=>t.color);
+    contributors.map(c => c.load / total);
+
   chart.update();
 }
 
+/* ========= EXPORT ========= */
 function exportCSV(){
   let csv = "time,task,type,difficulty,seconds,cli\n";
-  tasks.forEach(t=>{
+  tasks.forEach(t => {
     csv += `${Date.now()},${t.name},${t.type},${t.difficulty},${t.seconds},${t.cliContribution}\n`;
   });
-  download(csv,"loadline.csv","text/csv");
+  download(csv, "loadline.csv", "text/csv");
 }
 
 function exportJSON(){
-  download(JSON.stringify({tasks,cliLog},null,2),
-    "loadline.json","application/json");
+  download(
+    JSON.stringify({ tasks, cliLog }, null, 2),
+    "loadline.json",
+    "application/json"
+  );
 }
 
-function download(data,name,type){
-  const blob = new Blob([data],{type});
+function download(data, name, type){
+  const blob = new Blob([data], { type });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -281,4 +316,3 @@ function download(data,name,type){
 
 </body>
 </html>
-
