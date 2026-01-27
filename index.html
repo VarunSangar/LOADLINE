@@ -22,6 +22,8 @@ body {
   padding:1.25rem;
   margin-top:1.25rem;
 }
+h1 { font-size:2.2rem; margin-bottom:0; }
+h2 { margin-top:0; }
 .metric { color:#b3b3c6; margin-top:0.25rem; }
 button {
   background:#5b7cff;
@@ -41,6 +43,7 @@ input {
   border:none;
   background:#222431;
   color:#fff;
+  margin-top:0.25rem;
 }
 .task {
   border-top:1px solid #2a2d3e;
@@ -61,6 +64,7 @@ canvas { max-width:100%; margin-top:1rem; }
 <div class="container" id="gate">
   <div class="card">
     <h1>LOADLINE</h1>
+    <p class="metric">Pilot Access</p>
     <input id="accessCode" type="password" placeholder="Access code" />
     <button onclick="unlock()">Enter</button>
     <p id="error" style="color:#f87171;"></p>
@@ -68,11 +72,14 @@ canvas { max-width:100%; margin-top:1rem; }
 </div>
 
 <div class="container" id="app" style="display:none;">
+  <h1>LOADLINE v2</h1>
+
   <div class="card">
     <h2>Live Cognitive Load</h2>
     <div class="result" id="cliValue">—</div>
-    <div class="metric">⏱ <span id="sessionTime">0:00</span></div>
-    <div class="metric">🔥 Peak: <span id="cliPeak">—</span></div>
+    <div class="metric">⏱ Time Active: <span id="sessionTime">0:00</span></div>
+    <div class="metric">📈 CLI / min: <span id="cliRate">—</span></div>
+    <div class="metric">🔥 Peak CLI: <span id="cliPeak">—</span></div>
     <canvas id="pieChart"></canvas>
   </div>
 
@@ -82,29 +89,35 @@ canvas { max-width:100%; margin-top:1rem; }
     <button onclick="addTask()">+ Add Task</button>
     <button class="secondary" onclick="addBreak()">+ Add Break</button>
   </div>
+
+  <div class="card">
+    <h2>Export</h2>
+    <button onclick="exportCSV()">Export CSV</button>
+    <button class="secondary" onclick="exportJSON()">Export JSON</button>
+  </div>
 </div>
 
 <script>
 const VALID_CODES = ["turtle123"];
-const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7","#06b6d4"];
 
 let tasks = [];
 let activeTask = null;
 let sessionStart = null;
+let globalTimer = null;
 let cliPeak = 0;
+let cliLog = [];
 let chart = null;
-let colorIndex = 0;
 
 function unlock(){
-  if(!VALID_CODES.includes(accessCode.value)){
+  if(VALID_CODES.includes(accessCode.value)){
+    gate.style.display="none";
+    app.style.display="block";
+    sessionStart = Date.now();
+    globalTimer = setInterval(tick,1000);
+    initChart();
+  } else {
     error.textContent="Invalid access code.";
-    return;
   }
-  gate.style.display="none";
-  app.style.display="block";
-  sessionStart = Date.now();
-  setInterval(tick,1000);
-  initChart();
 }
 
 function addTask(){ createTask("task"); }
@@ -112,131 +125,190 @@ function addBreak(){ createTask("break"); }
 
 function createTask(type){
   tasks.push({
-    id: Date.now()+Math.random(),
+    id: Date.now() + Math.random(),
     type,
-    name: type==="break" ? "Break" : "",
-    difficulty: type==="break" ? 0 : 0.5,
+    name: type === "break" ? "Break" : "",
+    difficulty: type === "break" ? 0 : 0.5,
     seconds: 0,
-    color: COLORS[colorIndex++ % COLORS.length],
-    timeEl: null
+    cliContribution: 0
   });
   renderTasks();
 }
 
+function updateTaskName(id,value){
+  const t = tasks.find(x => x.id === id);
+  if(t) t.name = value;
+}
+
+function updateTaskDifficulty(id,value){
+  const t = tasks.find(x => x.id === id);
+  if(t) t.difficulty = Number(value);
+}
+
 function renderTasks(){
   const el = document.getElementById("tasks");
-  el.innerHTML="";
+  el.innerHTML = "";
 
-  tasks.forEach(t=>{
-    const div=document.createElement("div");
-    div.className="task"+(activeTask===t.id?" active":"");
+  tasks.forEach(t => {
+    const div = document.createElement("div");
+    div.className = "task" + (activeTask === t.id ? " active" : "");
 
-    const timeSpan=document.createElement("span");
-    timeSpan.textContent="0:00";
-    t.timeEl=timeSpan;
+    div.innerHTML = `
+      ${t.type === "task" ? `
+        <label>Task Name</label>
+        <input value="${t.name}" oninput="updateTaskName(${t.id}, this.value)">
+        <label>Difficulty (0–1)</label>
+        <input type="number" min="0" max="1" step="0.1"
+          value="${t.difficulty}"
+          onchange="updateTaskDifficulty(${t.id}, this.value)">
+      ` : `<strong>Break</strong>`}
 
-    if(t.type==="task"){
-      const name=document.createElement("input");
-      name.value=t.name;
-      name.oninput=e=>t.name=e.target.value;
+      <div class="metric">
+        ⏱ ${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}
+      </div>
 
-      const diff=document.createElement("input");
-      diff.type="number";
-      diff.min=0; diff.max=1; diff.step=0.1;
-      diff.value=t.difficulty;
-      diff.onchange=e=>t.difficulty=Number(e.target.value) || 0;
-
-      div.append("Task Name",name,"Difficulty",diff);
-    } else {
-      div.innerHTML="<strong>Break</strong>";
-    }
-
-    div.appendChild(document.createElement("br"));
-    div.appendChild(timeSpan);
-
-    const start=document.createElement("button");
-    start.textContent="Start";
-    start.onclick=()=>activeTask=t.id;
-
-    const stop=document.createElement("button");
-    stop.textContent="Stop";
-    stop.className="secondary";
-    stop.onclick=()=>activeTask=null;
-
-    div.append(start,stop);
+      <button onclick="startTask(${t.id})">Start</button>
+      <button class="secondary" onclick="stopTask()">Stop</button>
+    `;
     el.appendChild(div);
   });
 }
 
+function startTask(id){ activeTask = id; }
+function stopTask(){ activeTask = null; }
+
 function tick(){
-  const elapsed=Math.floor((Date.now()-sessionStart)/1000);
-  sessionTime.textContent=`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
+  if(!sessionStart) return;
+
+  const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+  sessionTime.textContent =
+    `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
 
   if(activeTask){
-    const t=tasks.find(x=>x.id===activeTask);
-    if(t){
-      t.seconds++;
-      if(t.timeEl){
-        t.timeEl.textContent=
-          `${Math.floor(t.seconds/60)}:${String(t.seconds%60).padStart(2,"0")}`;
-      }
-    }
+    const t = tasks.find(x => x.id === activeTask);
+    if(t) t.seconds++;
   }
+
   computeCLI();
+  renderTasks();
 }
 
 function computeCLI(){
-  let total=0;
-  let contributors=[];
+  let totalLoad = 0;
+  let contributors = [];
 
-  tasks.forEach(t=>{
-    let load=0;
-    if(t.type==="task"){
-      const difficulty=Number(t.difficulty) || 0;
-      const timeFactor=Math.min(t.seconds/1800,1);
-      load=(difficulty+timeFactor)/2;
+  tasks.forEach(t => {
+    let load = 0;
+
+    if(t.type === "task"){
+      const timeFactor = Math.min(t.seconds / 1800, 1);
+      load = (t.difficulty + timeFactor) / 2;
     }
-    if(t.type==="break" && activeTask===t.id){
-      load=-0.015*t.seconds;
+
+    if(t.type === "break" && activeTask === t.id){
+      load = -0.015 * t.seconds;
     }
-    total+=load;
-    if(load>0 && t.type==="task") contributors.push(t);
+
+    t.cliContribution = load;
+    totalLoad += load;
+
+    if(load > 0 && t.type === "task"){
+      contributors.push({ name: t.name || "Task", load });
+    }
   });
 
-  const CLI=Math.max(0,Math.min(100,total*30));
-  cliPeak=Math.max(cliPeak,CLI);
-  cliValue.textContent=Math.round(CLI);
-  cliPeak.textContent=Math.round(cliPeak);
+  const CLI = Math.max(0, Math.min(100, totalLoad * 30));
+  cliPeak = Math.max(cliPeak, CLI);
+
+  cliLog.push({ time: Date.now(), cli: CLI });
+
+  cliValue.textContent = Math.round(CLI);
+  document.getElementById("cliPeak").textContent = Math.round(cliPeak);
+
+  if(cliLog.length > 10){
+    const a = cliLog.at(-1);
+    const b = cliLog.at(-10);
+    const rate =
+      ((a.cli - b.cli) / ((a.time - b.time) / 60000)).toFixed(2);
+    cliRate.textContent = rate;
+  }
+
   updateChart(contributors);
 }
 
 function initChart(){
-  chart=new Chart(pieChart,{
+  chart = new Chart(pieChart,{
     type:"pie",
-    data:{labels:["Idle"],datasets:[{data:[1],backgroundColor:["#2a2d3e"]}]}
+    data:{
+      labels:["Idle"],
+      datasets:[{
+        data:[1],
+        backgroundColor:["#2a2d3e"],
+        borderWidth:0
+      }]
+    },
+    options:{
+      responsive:true,
+      animation:false,
+      plugins:{
+        legend:{
+          position:"bottom",
+          labels:{ color:"#eaeaf0", padding:12 }
+        }
+      }
+    }
   });
 }
 
-function updateChart(c){
-  if(!c.length){
-    chart.data.labels=["Idle"];
-    chart.data.datasets[0].data=[1];
-    chart.data.datasets[0].backgroundColor=["#2a2d3e"];
+function updateChart(contributors){
+  if(!chart) return;
+
+  if(contributors.length === 0){
+    chart.data.labels = ["Idle"];
+    chart.data.datasets[0].data = [1];
     chart.update();
     return;
   }
 
-  const loads=c.map(t=>{
-    const d=Number(t.difficulty)||0;
-    return (d+Math.min(t.seconds/1800,1))/2;
-  });
-  const sum=loads.reduce((a,b)=>a+b,0) || 1;
+  if(contributors.length === 1){
+    chart.data.labels = [contributors[0].name];
+    chart.data.datasets[0].data = [1];
+    chart.update();
+    return;
+  }
 
-  chart.data.labels=c.map(t=>t.name||"Task");
-  chart.data.datasets[0].data=loads.map(l=>l/sum);
-  chart.data.datasets[0].backgroundColor=c.map(t=>t.color);
+  const total = contributors.reduce((s,c)=>s+c.load,0);
+  chart.data.labels = contributors.map(c=>c.name);
+  chart.data.datasets[0].data =
+    contributors.map(c=>c.load / total);
   chart.update();
 }
+
+function exportCSV(){
+  let csv = "time,task,type,difficulty,seconds,cli\n";
+  tasks.forEach(t=>{
+    csv += `${Date.now()},${t.name},${t.type},${t.difficulty},${t.seconds},${t.cliContribution}\n`;
+  });
+  download(csv,"loadline.csv","text/csv");
+}
+
+function exportJSON(){
+  download(
+    JSON.stringify({tasks,cliLog},null,2),
+    "loadline.json",
+    "application/json"
+  );
+}
+
+function download(data,name,type){
+  const blob = new Blob([data],{type});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+}
 </script>
+
 </body>
 </html>
+
