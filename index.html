@@ -99,6 +99,7 @@ canvas { max-width:100%; margin-top:1rem; }
 
 <script>
 const VALID_CODES = ["turtle123"];
+const COLORS = ["#5b7cff","#22c55e","#f97316","#ec4899","#a855f7","#06b6d4"];
 
 let tasks = [];
 let activeTask = null;
@@ -107,6 +108,7 @@ let globalTimer = null;
 let cliPeak = 0;
 let cliLog = [];
 let chart = null;
+let colorIndex = 0;
 
 function unlock(){
   if(VALID_CODES.includes(accessCode.value)){
@@ -130,9 +132,10 @@ function createTask(type){
     name: type === "break" ? "Break" : "",
     difficulty: type === "break" ? 0 : 0.5,
     seconds: 0,
-    cliContribution: 0
+    cliContribution: 0,
+    color: COLORS[colorIndex++ % COLORS.length]
   });
-  renderTasks();
+  renderTasks(true);
 }
 
 function updateTaskName(id,value){
@@ -145,7 +148,9 @@ function updateTaskDifficulty(id,value){
   if(t) t.difficulty = Number(value);
 }
 
-function renderTasks(){
+function renderTasks(force=false){
+  if(!force && document.activeElement.tagName === "INPUT") return;
+
   const el = document.getElementById("tasks");
   el.innerHTML = "";
 
@@ -156,7 +161,9 @@ function renderTasks(){
     div.innerHTML = `
       ${t.type === "task" ? `
         <label>Task Name</label>
-        <input value="${t.name}" oninput="updateTaskName(${t.id}, this.value)">
+        <input placeholder="e.g. Studying, Coding"
+          value="${t.name}"
+          oninput="updateTaskName(${t.id}, this.value)">
         <label>Difficulty (0–1)</label>
         <input type="number" min="0" max="1" step="0.1"
           value="${t.difficulty}"
@@ -178,8 +185,6 @@ function startTask(id){ activeTask = id; }
 function stopTask(){ activeTask = null; }
 
 function tick(){
-  if(!sessionStart) return;
-
   const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
   sessionTime.textContent =
     `${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`;
@@ -199,12 +204,10 @@ function computeCLI(){
 
   tasks.forEach(t => {
     let load = 0;
-
     if(t.type === "task"){
       const timeFactor = Math.min(t.seconds / 1800, 1);
       load = (t.difficulty + timeFactor) / 2;
     }
-
     if(t.type === "break" && activeTask === t.id){
       load = -0.015 * t.seconds;
     }
@@ -213,7 +216,7 @@ function computeCLI(){
     totalLoad += load;
 
     if(load > 0 && t.type === "task"){
-      contributors.push({ name: t.name || "Task", load });
+      contributors.push(t);
     }
   });
 
@@ -223,15 +226,7 @@ function computeCLI(){
   cliLog.push({ time: Date.now(), cli: CLI });
 
   cliValue.textContent = Math.round(CLI);
-  document.getElementById("cliPeak").textContent = Math.round(cliPeak);
-
-  if(cliLog.length > 10){
-    const a = cliLog.at(-1);
-    const b = cliLog.at(-10);
-    const rate =
-      ((a.cli - b.cli) / ((a.time - b.time) / 60000)).toFixed(2);
-    cliRate.textContent = rate;
-  }
+  cliPeak.textContent = Math.round(cliPeak);
 
   updateChart(contributors);
 }
@@ -239,48 +234,26 @@ function computeCLI(){
 function initChart(){
   chart = new Chart(pieChart,{
     type:"pie",
-    data:{
-      labels:["Idle"],
-      datasets:[{
-        data:[1],
-        backgroundColor:["#2a2d3e"],
-        borderWidth:0
-      }]
-    },
-    options:{
-      responsive:true,
-      animation:false,
-      plugins:{
-        legend:{
-          position:"bottom",
-          labels:{ color:"#eaeaf0", padding:12 }
-        }
-      }
-    }
+    data:{ labels:["Idle"], datasets:[{ data:[1], backgroundColor:["#2a2d3e"] }]},
+    options:{ plugins:{ legend:{ labels:{ color:"#eaeaf0" }}}}
   });
 }
 
 function updateChart(contributors){
-  if(!chart) return;
-
   if(contributors.length === 0){
-    chart.data.labels = ["Idle"];
-    chart.data.datasets[0].data = [1];
+    chart.data.labels=["Idle"];
+    chart.data.datasets[0].data=[1];
+    chart.data.datasets[0].backgroundColor=["#2a2d3e"];
     chart.update();
     return;
   }
 
-  if(contributors.length === 1){
-    chart.data.labels = [contributors[0].name];
-    chart.data.datasets[0].data = [1];
-    chart.update();
-    return;
-  }
-
-  const total = contributors.reduce((s,c)=>s+c.load,0);
-  chart.data.labels = contributors.map(c=>c.name);
+  const total = contributors.reduce((s,c)=>s+c.cliContribution,0);
+  chart.data.labels = contributors.map(t=>t.name || "Task");
   chart.data.datasets[0].data =
-    contributors.map(c=>c.load / total);
+    contributors.map(t=>t.cliContribution/total);
+  chart.data.datasets[0].backgroundColor =
+    contributors.map(t=>t.color);
   chart.update();
 }
 
@@ -293,11 +266,8 @@ function exportCSV(){
 }
 
 function exportJSON(){
-  download(
-    JSON.stringify({tasks,cliLog},null,2),
-    "loadline.json",
-    "application/json"
-  );
+  download(JSON.stringify({tasks,cliLog},null,2),
+    "loadline.json","application/json");
 }
 
 function download(data,name,type){
