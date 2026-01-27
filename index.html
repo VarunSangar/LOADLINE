@@ -98,8 +98,15 @@ canvas { max-width:100%; margin-top:1rem; }
 </div>
 
 <script>
-/* ========= ACCESS ========= */
 const VALID_CODES = ["turtle123"];
+
+let tasks = [];
+let activeTask = null;
+let sessionStart = null;
+let globalTimer = null;
+let cliPeak = 0;
+let cliLog = [];
+let chart = null;
 
 function unlock(){
   if(VALID_CODES.includes(accessCode.value)){
@@ -113,16 +120,6 @@ function unlock(){
   }
 }
 
-/* ========= STATE ========= */
-let tasks = [];
-let activeTask = null;
-let sessionStart = null;
-let globalTimer = null;
-let cliPeak = 0;
-let cliLog = [];
-let chart = null;
-
-/* ========= TASK MANAGEMENT ========= */
 function addTask(){ createTask("task"); }
 function addBreak(){ createTask("break"); }
 
@@ -173,7 +170,6 @@ function renderTasks(){
       <button onclick="startTask(${t.id})">Start</button>
       <button class="secondary" onclick="stopTask()">Stop</button>
     `;
-
     el.appendChild(div);
   });
 }
@@ -181,7 +177,6 @@ function renderTasks(){
 function startTask(id){ activeTask = id; }
 function stopTask(){ activeTask = null; }
 
-/* ========= CORE LOOP ========= */
 function tick(){
   if(!sessionStart) return;
 
@@ -198,7 +193,6 @@ function tick(){
   renderTasks();
 }
 
-/* ========= CLI MODEL ========= */
 function computeCLI(){
   let totalLoad = 0;
   let contributors = [];
@@ -242,7 +236,6 @@ function computeCLI(){
   updateChart(contributors);
 }
 
-/* ========= PIE CHART ========= */
 function initChart(){
   chart = new Chart(pieChart,{
     type:"pie",
@@ -291,7 +284,6 @@ function updateChart(contributors){
   chart.update();
 }
 
-/* ========= EXPORT ========= */
 function exportCSV(){
   let csv = "time,task,type,difficulty,seconds,cli\n";
   tasks.forEach(t=>{
